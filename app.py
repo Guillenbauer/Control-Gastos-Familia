@@ -3,8 +3,7 @@ import pandas as pd
 from datetime import datetime, date
 import io
 import plotly.express as px
-import requests
-import json
+import os
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="Control de Gastos Familiar", layout="wide", page_icon="💰")
@@ -17,7 +16,7 @@ if "autenticado" not in st.session_state:
 
 if not st.session_state["autenticado"]:
     st.markdown("<br><br>", unsafe_allow_html=True)
-    col_login, _ = st.columns([1, 1]) # Corregido con especificación de dimensiones
+    col_login, _ = st.columns([1, 2])
     with col_login:
         with st.container(border=True):
             st.subheader("🔒 Acceso de la Familia")
@@ -41,40 +40,39 @@ CATEGORIAS = {
     "Variables Opcionales": ["Viajes", "Regalos", "Ocio (Cine, Bolera…)", "Restaurantes", "Ropa", "Alimentación", "Peluquero", "Taller Coche", "Caldera", "Electrodomésticos", "Parking", "Peaje", "Otros", "Recon. Médico", "Gastos Heredado"]
 }
 
+# --- SISTEMA DE ALMACENAMIENTO FIJO ---
+ARCHIVO_DATOS = "gastos_familia_datos.csv"
+
 def obtener_gastos():
-    try:
-        url_script = st.secrets["url_script"]
-        # SOLUCIÓN DE RAÍZ: Llamamos directamente a tu Apps Script para leer las celdas
-        response = requests.get(url_script, timeout=10)
-        if response.status_code == 200:
-            datos = response.json()
-            if datos and len(datos) > 0:
-                df = pd.DataFrame(datos)
-                # Google Forms genera automáticamente una columna de hora ("Marca temporal" o similar) como primera columna.
-                # Si el script devuelve esa columna extra, la limpiamos para quedarnos solo con vuestros 5 campos.
-                if len(df.columns) >= 6:
-                    df = df.iloc[:, 1:6]
-                
-                # Forzamos los nombres de columna correctos para mapear los gráficos
-                df.columns = ["Fecha", "Tipo de Gasto", "Concepto", "Importe", "Comentario"]
-                df = df.dropna(subset=["Fecha"])
+    # Si el archivo ya existe en tu almacenamiento del servidor, lo lee
+    if os.path.exists(ARCHIVO_DATOS):
+        try:
+            df = pd.read_csv(ARCHIVO_DATOS)
+            if not df.empty:
                 df['fecha_dt'] = pd.to_datetime(df['Fecha'], format='%d/%m/%Y', errors='coerce')
                 df['Importe'] = pd.to_numeric(df['Importe'], errors='coerce')
                 return df
-    except Exception:
-        pass
-    return pd.DataFrame()
+        except Exception:
+            pass
+    # Si es la primera vez o no existe, devuelve una tabla vacía estructurada
+    return pd.DataFrame(columns=["Fecha", "Tipo de Gasto", "Concepto", "Importe", "Comentario"])
 
 def guardar_gasto(fecha, tipo_gasto, concepto, importe, comentario):
-    url_script = st.secrets["url_script"]
-    payload = {
-        "fecha": fecha.strftime("%d/%m/%Y"),
-        "tipo": tipo_gasto,
-        "concepto": concepto,
-        "importe": float(importe),
-        "comentario": comentario if comentario else ""
-    }
-    requests.post(url_script, data=json.dumps(payload), timeout=10)
+    df_existente = obtener_gastos()
+    if 'fecha_dt' in df_existente.columns:
+        df_existente = df_existente.drop(columns=['fecha_dt'])
+        
+    nuevo_registro = pd.DataFrame([{
+        "Fecha": fecha.strftime("%d/%m/%Y"),
+        "Tipo de Gasto": tipo_gasto,
+        "Concepto": concepto,
+        "Importe": float(importe),
+        "Comentario": comentario if comentario else ""
+    }])
+    
+    df_actualizado = pd.concat([df_existente, nuevo_registro], ignore_index=True)
+    # Guarda el archivo directamente en el almacenamiento persistente del contenedor
+    df_actualizado.to_csv(ARCHIVO_DATOS, index=False)
 
 st.title("💰 Control de Gastos de la Familia")
 menu = st.sidebar.radio("Navegación", ["1. Registrar Gasto", "2. Estadísticas y Gráficos"])
@@ -103,10 +101,10 @@ if menu == "1. Registrar Gasto":
             if importe > 0:
                 try:
                     guardar_gasto(fecha, tipo_gasto, concepto, importe, comentario)
-                    st.success(f"✅ ¡Gasto registrado y enviado a tu Google Sheets con éxito!")
-                    st.toast("Sincronizado")
+                    st.success(f"✅ ¡Gasto registrado y blindado en tu base de datos anual!")
+                    st.toast("Guardado con éxito")
                 except Exception:
-                    st.error("Error al enviar los datos a Google Sheets.")
+                    st.error("Error al guardar el registro en el almacenamiento local.")
             else:
                 st.error("⚠️ El importe debe ser mayor que 0")
 
@@ -115,7 +113,7 @@ elif menu == "2. Estadísticas y Gráficos":
     df = obtener_gastos()
     
     if df.empty or 'fecha_dt' not in df or df['fecha_dt'].isna().all():
-        st.info("Aún no hay gastos registrados visibles en tu Google Sheets o el sistema está sincronizando la pestaña. Registra tu primer gasto en la pestaña 1.")
+        st.info("Aún no hay gastos registrados visibles en tu base de datos. Registra tu primer gasto en la pestaña 1.")
     else:
         st.subheader("🔍 Filtros de Búsqueda")
         col_f1, col_f2, col_f3 = st.columns(3)
