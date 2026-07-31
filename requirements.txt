@@ -1,4 +1,5 @@
 pandas
 openpyxl
 plotly
-st-gsheets-connection
+gspread
+
