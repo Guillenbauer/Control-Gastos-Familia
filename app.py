@@ -1,9 +1,9 @@
 import streamlit as st
 import pandas as pd
-import sqlite3
 from datetime import datetime, date
 import io
 import plotly.express as px
+from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="Control de Gastos Familiar", layout="wide", page_icon="💰")
@@ -16,47 +16,43 @@ CATEGORIAS = {
     "Variables Opcionales": ["Viajes", "Regalos", "Ocio (Cine, Bolera…)", "Restaurantes", "Ropa", "Alimentación", "Peluquero", "Taller Coche", "Caldera", "Electrodomésticos", "Parking", "Peaje", "Otros", "Recon. Médico", "Gastos Heredado"]
 }
 
-# --- BASE DE DATOS ---
-def conectar_db():
-    conn = sqlite3.connect("gastos_familia.db")
-    c = conn.cursor()
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS gastos (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            fecha TEXT,
-            tipo_gasto TEXT,
-            concepto TEXT,
-            importe REAL,
-            comentario TEXT
-        )
-    ''')
-    conn.commit()
-    return conn
-
-def guardar_gasto(fecha, tipo_gasto, concepto, importe, comentario):
-    conn = conectar_db()
-    c = conn.cursor()
-    c.execute("INSERT INTO gastos (fecha, tipo_gasto, concepto, importe, comentario) VALUES (?, ?, ?, ?, ?)",
-              (fecha.strftime("%Y-%m-%d"), tipo_gasto, concepto, importe, comentario))
-    conn.commit()
-    conn.close()
+# --- CONEXIÓN DIRECTA CON GOOGLE SHEETS ---
+conn = st.connection("gsheets", type=GSheetsConnection)
 
 def obtener_gastos():
-    conn = conectar_db()
-    df = pd.read_sql_query("SELECT * FROM gastos", conn)
-    conn.close()
+    # Lee todos los datos existentes en la hoja de Google Sheets
+    df = conn.read(ttl="0d") # ttl=0 evita que guarde copia en cache y fuerza la lectura en tiempo real
+    df = df.dropna(subset=["Fecha"]) # Limpia filas vacías si las hay
     if not df.empty:
-        df['fecha_dt'] = pd.to_datetime(df['fecha'])
-        df['Fecha'] = df['fecha_dt'].dt.strftime('%d/%m/%Y')
+        # Convertimos la fecha para poder ordenar y filtrar de forma interna
+        df['fecha_dt'] = pd.to_datetime(df['Fecha'], format='%d/%m/%Y', errors='coerce')
+        df['Importe'] = pd.to_numeric(df['Importe'], errors='coerce')
     return df
 
-# NUEVA FUNCIÓN: Eliminar registro por ID
-def eliminar_gasto(id_gasto):
-    conn = conectar_db()
-    c = conn.cursor()
-    c.execute("DELETE FROM gastos WHERE id = ?", (int(id_gasto),))
-    conn.commit()
-    conn.close()
+def guardar_gasto(fecha, tipo_gasto, concepto, importe, comentario):
+    df_existente = conn.read(ttl="0d")
+    df_existente = df_existente.dropna(subset=["Fecha"])
+    
+    # Formateamos el nuevo registro
+    nuevo_registro = pd.DataFrame([{
+        "Fecha": fecha.strftime("%d/%m/%Y"), # Formato español nativo
+        "Tipo de Gasto": tipo_gasto,
+        "Concepto": concepto,
+        "Importe": float(importe),
+        "Comentario": comentario
+    }])
+    
+    # Unimos el gasto nuevo a la tabla existente
+    df_actualizado = pd.concat([df_existente, nuevo_registro], ignore_index=True)
+    # Volcamos de golpe la tabla actualizada a Google Sheets
+    conn.update(data=df_actualizado)
+
+def eliminar_gasto(indice_fila):
+    df_existente = conn.read(ttl="0d")
+    df_existente = df_existente.dropna(subset=["Fecha"])
+    # Borramos la fila seleccionada usando su posición
+    df_actualizado = df_existente.drop(indice_fila).reset_index(drop=True)
+    conn.update(data=df_actualizado)
 
 st.title("💰 Control de Gastos de la Familia")
 menu = st.sidebar.radio("Navegación", ["1. Registrar Gasto", "2. Estadísticas y Gráficos"])
@@ -83,14 +79,13 @@ if menu == "1. Registrar Gasto":
             importe = st.number_input("Importe (€)", min_value=0.0, step=0.01, format="%.2f", key="importe_input")
             
         comentario = st.text_input("Comentario / Detalle (Opcional)", key="comentario_input")
-        
         boton_enviar = st.button("Añadir Gasto", type="primary")
         
         if boton_enviar:
             if importe > 0:
                 guardar_gasto(fecha, tipo_gasto, concepto, importe, comentario)
-                st.success(f"✅ Guardado correctamente: {concepto} ({tipo_gasto}) - {importe}€")
-                st.toast("¡Gasto registrado con éxito!")
+                st.success(f"✅ Guardado correctamente en Google Sheets: {concepto} - {importe}€")
+                st.toast("¡Datos sincronizados online!")
             else:
                 st.error("⚠️ El importe debe ser mayor que 0")
 
@@ -99,8 +94,8 @@ elif menu == "2. Estadísticas y Gráficos":
     st.header("📊 Análisis de Gastos en Tiempo Real")
     df = obtener_gastos()
     
-    if df.empty:
-        st.info("Aún no hay gastos registrados. Ve al formulario para añadir el primero.")
+    if df.empty or 'fecha_dt' not in df or df['fecha_dt'].isna().all():
+        st.info("Aún no hay gastos registrados válidos en Google Sheets. Ve al formulario para añadir el primero.")
     else:
         st.subheader("🔍 Filtros de Búsqueda")
         col_f1, col_f2, col_f3 = st.columns(3)
@@ -111,10 +106,10 @@ elif menu == "2. Estadísticas y Gráficos":
             rango_fechas = st.date_input("Rango de Fechas", [fecha_min, fecha_max], format="DD/MM/YYYY")
             
         with col_f2:
-            tipos_seleccionados = st.multiselect("Filtrar por Tipo de Gasto", options=df['tipo_gasto'].unique(), default=df['tipo_gasto'].unique())
+            tipos_seleccionados = st.multiselect("Filtrar por Tipo de Gasto", options=df['Tipo de Gasto'].unique(), default=df['Tipo de Gasto'].unique())
             
         with col_f3:
-            conceptos_filtrados = df[df['tipo_gasto'].isin(tipos_seleccionados)]['concepto'].unique()
+            conceptos_filtrados = df[df['Tipo de Gasto'].isin(tipos_seleccionados)]['Concepto'].unique()
             conceptos_seleccionados = st.multiselect("Filtrar por Concepto", options=conceptos_filtrados, default=conceptos_filtrados)
             
         if len(rango_fechas) == 2:
@@ -123,10 +118,10 @@ elif menu == "2. Estadísticas y Gráficos":
         else:
             df_filtrado = df.copy()
             
-        df_filtrado = df_filtrado[df_filtrado['tipo_gasto'].isin(tipos_seleccionados)]
-        df_filtrado = df_filtrado[df_filtrado['concepto'].isin(conceptos_seleccionados)]
+        df_filtrado = df_filtrado[df_filtrado['Tipo de Gasto'].isin(tipos_seleccionados)]
+        df_filtrado = df_filtrado[df_filtrado['Concepto'].isin(conceptos_seleccionados)]
         
-        total_gastado = df_filtrado['importe'].sum()
+        total_gastado = df_filtrado['Importe'].sum()
         st.metric(label="Total Gastado en Periodo Seleccionado", value=f"{total_gastado:,.2f} €")
         
         st.subheader("📈 Gráficos Visuales")
@@ -134,49 +129,38 @@ elif menu == "2. Estadísticas y Gráficos":
         
         with col_g1:
             st.markdown("**Gasto por Tipo de Gasto**")
-            fig_tipo = px.pie(df_filtrado, values='importe', names='tipo_gasto', hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel)
+            fig_tipo = px.pie(df_filtrado, values='Importe', names='Tipo de Gasto', hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel)
             st.plotly_chart(fig_tipo, use_container_width=True)
             
         with col_g2:
             st.markdown("**Gasto por Concepto**")
-            fig_concepto = px.bar(df_filtrado.groupby('concepto')['importe'].sum().reset_index(), 
-                                  x='concepto', y='importe', color='concepto', text_auto='.2s')
+            fig_concepto = px.bar(df_filtrado.groupby('Concepto')['Importe'].sum().reset_index(), 
+                                  x='Concepto', y='Importe', color='Concepto', text_auto='.2s')
             st.plotly_chart(fig_concepto, use_container_width=True)
             
-        # --- TABLA DE DATOS EDITABLE Y EXPORTAR ---
         st.subheader("📋 Historial de Datos Filtrados")
         
-        # Preparamos la vista cambiando los nombres de las columnas
-        df_vista = df_filtrado[['id', 'Fecha', 'tipo_gasto', 'concepto', 'importe', 'comentario']].rename(
-            columns={'tipo_gasto': 'Tipo de Gasto', 'concepto': 'Concepto', 'importe': 'Importe (€)', 'comentario': 'Comentario'}
-        )
+        # Mantenemos el índice original para poder saber exactamente qué fila borrar en Google Sheets
+        df_vista = df_filtrado[['Fecha', 'Tipo de Gasto', 'Concepto', 'Importe', 'Comentario']]
         
-        # NUEVO: Tabla interactiva que incluye un botón de borrar integrado por fila
         gasto_editado = st.data_editor(
             df_vista,
             use_container_width=True,
-            hide_index=True,
-            disabled=['Fecha', 'Tipo de Gasto', 'Concepto', 'Importe (€)', 'Comentario'], # Evitamos que editen texto directo
-            num_rows="dynamic" # Habilita la columna especial de borrado en Streamlit
+            hide_index=False, # Mostramos el índice para guiar el borrado de filas
+            disabled=['Fecha', 'Tipo de Gasto', 'Concepto', 'Importe', 'Comentario'],
+            num_rows="dynamic"
         )
         
-        # Si el usuario hace clic en el icono de papelera de la tabla de Streamlit
+        # Lógica de eliminación en base al índice de la fila borrada
         if len(gasto_editado) < len(df_vista):
-            # Identificamos qué fila se eliminó comparando los IDs
-            ids_actuales = set(gasto_editado['id']) if not gasto_editado.empty else set()
-            ids_originales = set(df_vista['id'])
-            id_eliminado = list(ids_originales - ids_actuales)[0]
-            
-            # Lo borramos físicamente de la base de datos
-            eliminar_gasto(id_eliminado)
-            st.success("🗑️ Registro eliminado correctamente.")
+            indice_eliminado = list(set(df_vista.index) - set(gasto_editado.index))[0]
+            eliminar_gasto(indice_eliminado)
+            st.success("🗑️ Registro eliminado directamente de Google Sheets.")
             st.rerun()
         
-        # Generar Excel en memoria con formato español (excluyendo la columna ID interna)
-        df_excel = df_vista.drop(columns=['id'])
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df_excel.to_excel(writer, index=False, sheet_name='Gastos_Familia')
+            df_vista.to_excel(writer, index=False, sheet_name='Gastos_Familia')
         excel_data = output.getvalue()
         
         st.download_button(
