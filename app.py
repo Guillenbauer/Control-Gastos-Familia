@@ -5,8 +5,46 @@ import io
 import plotly.express as px
 import os
 
-# --- CONFIGURACIÓN DE LA PÁGINA ---
+# --- CONFIGURACIÓN DE LA PÁGINA (CON TU LOGO FAMILIAR) ---
 st.set_page_config(page_title="Control de Gastos Familiar", layout="wide", page_icon="icono_familia.png")
+
+# --- DISEÑO COMPACTO PARA MÓVILES (CSS INYECTADO) ---
+st.markdown("""
+    <style>
+        /* Reduce el tamaño del título principal en móviles */
+        .main h1 {
+            font-size: 1.8rem !important;
+            margin-bottom: 5px !important;
+            padding-top: 10px !important;
+        }
+        /* Reduce el tamaño de los subtítulos de las secciones */
+        .main h2 {
+            font-size: 1.3rem !important;
+            margin-top: 10px !important;
+            margin-bottom: 5px !important;
+        }
+        /* Reduce el tamaño de los títulos de las tablas y gráficos */
+        .main h3 {
+            font-size: 1.1rem !important;
+            margin-top: 5px !important;
+        }
+        /* Hace que los contenedores de los formularios tengan menos márgenes vacíos */
+        .stElementContainer {
+            margin-bottom: 8px !important;
+        }
+        /* Reduce el espacio en blanco superior general de la página */
+        .block-container {
+            padding-top: 1rem !important;
+            padding-bottom: 1rem !important;
+            padding-left: 1rem !important;
+            padding-right: 1rem !important;
+        }
+        /* Hace que el texto dentro de los desplegables y cajas sea un poco más compacto */
+        .stSelectbox, .stNumberInput, .stTextInput {
+            margin-bottom: 5px !important;
+        }
+    </style>
+""", unsafe_allow_html=True)
 
 # --- CONTROL DE ACCESO / CONTRASEÑA ---
 CONTRASEÑA_CORRECTA = "FamiliaGSPA2026"
@@ -16,7 +54,7 @@ if "autenticado" not in st.session_state:
 
 if not st.session_state["autenticado"]:
     st.markdown("<br><br>", unsafe_allow_html=True)
-    col_login, _ = st.columns([1, 2])
+    col_login, _ = st.columns([1, 1])
     with col_login:
         with st.container(border=True):
             st.subheader("🔒 Acceso de la Familia")
@@ -74,13 +112,12 @@ def guardar_gasto(fecha, tipo_gasto, concepto, importe, comentario):
 def eliminar_gasto_por_indice(indice):
     df_existente = obtener_gastos()
     if not df_existente.empty:
-        # Eliminamos la fila por su número de posición interna
         df_actualizado = df_existente.drop(indice).reset_index(drop=True)
         if 'fecha_dt' in df_actualizado.columns:
             df_actualizado = df_actualizado.drop(columns=['fecha_dt'])
         df_actualizado.to_csv(ARCHIVO_DATOS, index=False)
 
-st.title("💰 Control de Gastos de la Familia")
+st.title("💰 Control de Gastos")
 menu = st.sidebar.radio("Navegación", ["1. Registrar Gasto", "2. Estadísticas y Gráficos"])
 
 if menu == "1. Registrar Gasto":
@@ -101,27 +138,28 @@ if menu == "1. Registrar Gasto":
             importe = st.number_input("Importe (€)", min_value=0.0, step=0.01, format="%.2f", key="importe_input")
             
         comentario = st.text_input("Comentario / Detalle (Opcional)", key="comentario_input")
-        boton_enviar = st.button("Añadir Gasto", type="primary")
+        boton_enviar = st.button("Añadir Gasto", type="primary", use_container_width=True)
         
         if boton_enviar:
             if importe > 0:
                 try:
                     guardar_gasto(fecha, tipo_gasto, concepto, importe, comentario)
-                    st.success(f"✅ ¡Gasto registrado y blindado en tu base de datos anual!")
+                    st.success(f"✅ ¡Gasto registrado!")
                     st.toast("Guardado con éxito")
+                    st.rerun()
                 except Exception:
                     st.error("Error al guardar el registro.")
             else:
                 st.error("⚠️ El importe debe ser mayor que 0")
 
 elif menu == "2. Estadísticas y Gráficos":
-    st.header("📊 Análisis de Gastos en Tiempo Real")
+    st.header("📊 Análisis de Gastos")
     df = obtener_gastos()
     
     if df.empty or 'fecha_dt' not in df or df['fecha_dt'].isna().all():
-        st.info("Aún no hay gastos registrados visibles en tu base de datos. Registra tu primer gasto en la pestaña 1.")
+        st.info("Aún no hay gastos registrados.")
     else:
-        st.subheader("🔍 Filtros de Búsqueda")
+        st.subheader("🔍 Filtros")
         col_f1, col_f2, col_f3 = st.columns(3)
         
         with col_f1:
@@ -130,7 +168,7 @@ elif menu == "2. Estadísticas y Gráficos":
             rango_fechas = st.date_input("Rango de Fechas", [fecha_min, fecha_max], format="DD/MM/YYYY")
             
         with col_f2:
-            tipos_seleccionados = st.multiselect("Filtrar por Tipo de Gasto", options=df["Tipo de Gasto"].unique(), default=df["Tipo de Gasto"].unique())
+            tipos_seleccionados = st.multiselect("Filtrar por Tipo", options=df["Tipo de Gasto"].unique(), default=df["Tipo de Gasto"].unique())
             
         with col_f3:
             conceptos_filtrados = df[df["Tipo de Gasto"].isin(tipos_seleccionados)]["Concepto"].unique()
@@ -146,41 +184,36 @@ elif menu == "2. Estadísticas y Gráficos":
         df_filtrado = df_filtrado[df_filtrado["Concepto"].isin(conceptos_seleccionados)]
         
         total_gastado = df_filtrado["Importe"].sum()
-        st.metric(label="Total Gastado en Periodo Seleccionado", value=f"{total_gastado:,.2f} €")
+        st.metric(label="Total Gastado", value=f"{total_gastado:,.2f} €")
         
-        st.subheader("📈 Gráficos Visuales")
-        col_g1, col_g2 = st.columns(2)
+        st.subheader("📈 Gráficos")
         
-        with col_g1:
-            st.markdown("**Gasto por Tipo de Gasto**")
-            fig_tipo = px.pie(df_filtrado, values="Importe", names="Tipo de Gasto", hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel)
-            st.plotly_chart(fig_tipo, use_container_width=True)
+        fig_tipo = px.pie(df_filtrado, values="Importe", names="Tipo de Gasto", hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel)
+        fig_tipo.update_layout(margin=dict(t=20, b=20, l=20, r=20), height=300)
+        st.markdown("**Por Tipo de Gasto**")
+        st.plotly_chart(fig_tipo, use_container_width=True)
+        
+        fig_concepto = px.bar(df_filtrado.groupby("Concepto")["Importe"].sum().reset_index(), 
+                              x="Concepto", y="Importe", color="Concepto", text_auto='.2s')
+        fig_concepto.update_layout(margin=dict(t=20, b=20, l=20, r=20), height=300)
+        st.markdown("**Por Concepto**")
+        st.plotly_chart(fig_concepto, use_container_width=True)
             
-        with col_g2:
-            st.markdown("**Gasto por Concepto**")
-            fig_concepto = px.bar(df_filtrado.groupby("Concepto")["Importe"].sum().reset_index(), 
-                                  x="Concepto", y="Importe", color="Concepto", text_auto='.2s')
-            st.plotly_chart(fig_concepto, use_container_width=True)
-            
-        st.subheader("📋 Historial de Datos Filtrados")
-        
-        # Mantenemos los índices originales visibles para identificar la fila a borrar
+        st.subheader("📋 Historial de Datos")
         df_vista = df_filtrado[['Fecha', "Tipo de Gasto", "Concepto", "Importe", "Comentario"]]
         
-        # CAMBIO CLAVE: Usamos st.data_editor con opción de borrado rápido activada
         gasto_editado = st.data_editor(
             df_vista,
             use_container_width=True,
-            num_rows="dynamic", # Activa la casilla de borrado a la izquierda y la papelera
-            disabled=["Fecha", "Tipo de Gasto", "Concepto", "Importe", "Comentario"] # Bloquea editar texto directo
+            num_rows="dynamic",
+            disabled=["Fecha", "Tipo de Gasto", "Concepto", "Importe", "Comentario"]
         )
         
-        # Si el usuario elimina una fila usando los controles nativos de la tabla
         if len(gasto_editado) < len(df_vista):
             indice_borrado = list(set(df_vista.index) - set(gasto_editado.index))
             if indice_borrado:
-                eliminar_gasto_por_indice(indice_borrado[0])
-                st.success("🗑️ Registro eliminado correctamente.")
+                eliminar_gasto_por_indice(indice_borrado)
+                st.success("🗑️ Registro eliminado.")
                 st.rerun()
         
         output = io.BytesIO()
@@ -189,8 +222,9 @@ elif menu == "2. Estadísticas y Gráficos":
         excel_data = output.getvalue()
         
         st.download_button(
-            label="📥 Exportar estos datos a Excel",
+            label="📥 Exportar a Excel",
             data=excel_data,
             file_name=f"gastos_familia_{datetime.now().strftime('%d_%m_%Y')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
         )
