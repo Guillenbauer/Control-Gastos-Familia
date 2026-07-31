@@ -6,7 +6,7 @@ import plotly.express as px
 import os
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
-st.set_page_config(page_title="Control de Gastos Familiar", layout="wide", page_icon="💰")
+st.set_page_config(page_title="Control de Gastos Familiar", layout="wide", page_icon="icono_familia.png")
 
 # --- CONTROL DE ACCESO / CONTRASEÑA ---
 CONTRASEÑA_CORRECTA = "FamiliaGSPA2026"
