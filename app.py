@@ -8,6 +8,32 @@ import requests
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="Control de Gastos Familiar", layout="wide", page_icon="💰")
 
+# --- CONTROL DE ACCESO / CONTRASEÑA ---
+# Puedes cambiar "Familia2026" por la contraseña que tú prefieras
+CONTRASEÑA_CORRECTA = "FamiliaGSPA2026"
+
+if "autenticado" not in st.session_state:
+    st.session_state["autenticado"] = False
+
+if not st.session_state["autenticado"]:
+    st.markdown("<br><br>", unsafe_allow_html=True)
+    col_login, _ = st.columns([1, 2])
+    with col_login:
+        with st.container(border=True):
+            st.subheader("🔒 Acceso de la Familia")
+            password_input = st.text_input("Introduce la contraseña para entrar:", type="password")
+            boton_ingresar = st.button("Ingresar", type="primary", use_container_width=True)
+            
+            if boton_ingresar:
+                if password_input == CONTRASEÑA_CORRECTA:
+                    st.session_state["autenticado"] = True
+                    st.success("✅ ¡Contraseña correcta!")
+                    st.rerun()
+                else:
+                    st.error("⚠️ Contraseña incorrecta. Inténtalo de nuevo.")
+    st.stop() # Detiene la carga del resto de la aplicación si no se ha puesto la contraseña
+
+# --- CATEGORÍAS DE GASTOS ---
 CATEGORIAS = {
     "Fijos Básicos": ["Hipoteca", "Colegio (La Salle)", "Guardería", "Comunidad", "Telefonía (O2)", "IBI"],
     "Fijos Opcionales": ["Extraescolares", "Suscripciones", "Seguro Médico", "Alquiler Garaje"],
@@ -18,10 +44,9 @@ CATEGORIAS = {
 def obtener_gastos():
     try:
         url_hoja = st.secrets["url_hoja"]
-        csv_url = url_hoja.split("/edit")[0] + "/export?format=csv"
+        csv_url = url_hoja.split("/edit") + "/export?format=csv"
         df = pd.read_csv(csv_url)
         if not df.empty:
-            # Forzamos nombres estándar para las columnas de lectura
             df.columns = ["Fecha", "Tipo de Gasto", "Concepto", "Importe", "Comentario"] + list(df.columns[5:])[:0]
             df = df.dropna(subset=["Fecha"])
             df['fecha_dt'] = pd.to_datetime(df['Fecha'], format='%d/%m/%Y', errors='coerce')
@@ -32,18 +57,6 @@ def obtener_gastos():
     return pd.DataFrame()
 
 def guardar_gasto(fecha, tipo_gasto, concepto, importe, comentario):
-    url_form = st.secrets["url_formulario"].replace('/viewform', '/formResponse')
-    
-    # Conseguimos los IDs de entrada enviando los datos de forma limpia
-    # Google Forms procesa de manera pública el volcado inmediato a la hoja de cálculo mapeada
-    try:
-        url_hoja = st.secrets["url_hoja"]
-        csv_url = url_hoja.split("/edit")[0] + "/export?format=csv"
-        df_previo = pd.read_csv(csv_url)
-    except Exception:
-        pass
-
-    # Formateamos una petición web directa compatible con el libro compartido
     st.session_state["gasto_pendiente"] = {
         "Fecha": fecha.strftime("%d/%m/%Y"),
         "Tipo de Gasto": tipo_gasto,
@@ -87,7 +100,6 @@ elif menu == "2. Estadísticas y Gráficos":
     st.header("📊 Análisis de Gastos en Tiempo Real")
     df = obtener_gastos()
     
-    # Manejo de registros temporales para evitar retrasos de sincronización visual en el primer uso
     if "gasto_pendiente" in st.session_state:
         nuevo_df = pd.DataFrame([st.session_state["gasto_pendiente"]])
         nuevo_df['fecha_dt'] = pd.to_datetime(nuevo_df['Fecha'], format='%d/%m/%Y')
@@ -105,7 +117,8 @@ elif menu == "2. Estadísticas y Gráficos":
             rango_fechas = st.date_input("Rango de Fechas", [fecha_min, fecha_max], format="DD/MM/YYYY")
             
         with col_f2:
-            tipos_seleccionados = st.multiselect("Filtrar por Tipo de Gasto", options=df["Tipo de Gasto"].unique(), default=df["Tipo de Gasto'].unique())
+            # CORREGIDO: Comillas emparejadas correctamente para evitar el SyntaxError
+            tipos_seleccionados = st.multiselect("Filtrar por Tipo de Gasto", options=df["Tipo de Gasto"].unique(), default=df["Tipo de Gasto"].unique())
             
         with col_f3:
             conceptos_filtrados = df[df["Tipo de Gasto"].isin(tipos_seleccionados)]["Concepto"].unique()
@@ -140,3 +153,15 @@ elif menu == "2. Estadísticas y Gráficos":
         st.subheader("📋 Historial de Datos Filtrados")
         df_vista = df_filtrado[['Fecha', "Tipo de Gasto", "Concepto", "Importe", "Comentario"]]
         st.dataframe(df_vista, use_container_width=True, hide_index=True)
+        
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df_vista.to_excel(writer, index=False, sheet_name='Gastos_Familia')
+        excel_data = output.getvalue()
+        
+        st.download_button(
+            label="📥 Exportar estos datos a Excel",
+            data=excel_data,
+            file_name=f"gastos_familia_{datetime.now().strftime('%d_%m_%Y')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
