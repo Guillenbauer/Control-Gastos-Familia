@@ -44,7 +44,6 @@ CATEGORIAS = {
 ARCHIVO_DATOS = "gastos_familia_datos.csv"
 
 def obtener_gastos():
-    # Si el archivo ya existe en tu almacenamiento del servidor, lo lee
     if os.path.exists(ARCHIVO_DATOS):
         try:
             df = pd.read_csv(ARCHIVO_DATOS)
@@ -54,7 +53,6 @@ def obtener_gastos():
                 return df
         except Exception:
             pass
-    # Si es la primera vez o no existe, devuelve una tabla vacía estructurada
     return pd.DataFrame(columns=["Fecha", "Tipo de Gasto", "Concepto", "Importe", "Comentario"])
 
 def guardar_gasto(fecha, tipo_gasto, concepto, importe, comentario):
@@ -71,8 +69,16 @@ def guardar_gasto(fecha, tipo_gasto, concepto, importe, comentario):
     }])
     
     df_actualizado = pd.concat([df_existente, nuevo_registro], ignore_index=True)
-    # Guarda el archivo directamente en el almacenamiento persistente del contenedor
     df_actualizado.to_csv(ARCHIVO_DATOS, index=False)
+
+def eliminar_gasto_por_indice(indice):
+    df_existente = obtener_gastos()
+    if not df_existente.empty:
+        # Eliminamos la fila por su número de posición interna
+        df_actualizado = df_existente.drop(indice).reset_index(drop=True)
+        if 'fecha_dt' in df_actualizado.columns:
+            df_actualizado = df_actualizado.drop(columns=['fecha_dt'])
+        df_actualizado.to_csv(ARCHIVO_DATOS, index=False)
 
 st.title("💰 Control de Gastos de la Familia")
 menu = st.sidebar.radio("Navegación", ["1. Registrar Gasto", "2. Estadísticas y Gráficos"])
@@ -104,7 +110,7 @@ if menu == "1. Registrar Gasto":
                     st.success(f"✅ ¡Gasto registrado y blindado en tu base de datos anual!")
                     st.toast("Guardado con éxito")
                 except Exception:
-                    st.error("Error al guardar el registro en el almacenamiento local.")
+                    st.error("Error al guardar el registro.")
             else:
                 st.error("⚠️ El importe debe ser mayor que 0")
 
@@ -157,8 +163,25 @@ elif menu == "2. Estadísticas y Gráficos":
             st.plotly_chart(fig_concepto, use_container_width=True)
             
         st.subheader("📋 Historial de Datos Filtrados")
+        
+        # Mantenemos los índices originales visibles para identificar la fila a borrar
         df_vista = df_filtrado[['Fecha', "Tipo de Gasto", "Concepto", "Importe", "Comentario"]]
-        st.dataframe(df_vista, use_container_width=True, hide_index=True)
+        
+        # CAMBIO CLAVE: Usamos st.data_editor con opción de borrado rápido activada
+        gasto_editado = st.data_editor(
+            df_vista,
+            use_container_width=True,
+            num_rows="dynamic", # Activa la casilla de borrado a la izquierda y la papelera
+            disabled=["Fecha", "Tipo de Gasto", "Concepto", "Importe", "Comentario"] # Bloquea editar texto directo
+        )
+        
+        # Si el usuario elimina una fila usando los controles nativos de la tabla
+        if len(gasto_editado) < len(df_vista):
+            indice_borrado = list(set(df_vista.index) - set(gasto_editado.index))
+            if indice_borrado:
+                eliminar_gasto_por_indice(indice_borrado[0])
+                st.success("🗑️ Registro eliminado correctamente.")
+                st.rerun()
         
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
