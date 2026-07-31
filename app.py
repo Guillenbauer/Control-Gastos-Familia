@@ -4,10 +4,12 @@ from datetime import datetime, date
 import io
 import plotly.express as px
 import requests
+import json
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="Control de Gastos Familiar", layout="wide", page_icon="💰")
 
+# --- CATEGORÍAS DE GASTOS ---
 CATEGORIAS = {
     "Fijos Básicos": ["Hipoteca", "Colegio (La Salle)", "Guardería", "Comunidad", "Telefonía (O2)", "IBI"],
     "Fijos Opcionales": ["Extraescolares", "Suscripciones", "Seguro Médico", "Alquiler Garaje"],
@@ -15,49 +17,51 @@ CATEGORIAS = {
     "Variables Opcionales": ["Viajes", "Regalos", "Ocio (Cine, Bolera…)", "Restaurantes", "Ropa", "Alimentación", "Peluquero", "Taller Coche", "Caldera", "Electrodomésticos", "Parking", "Peaje", "Otros", "Recon. Médico", "Gastos Heredado"]
 }
 
-def obtener_url_csv():
-    # Limpia la URL de los Secrets para convertirla en formato de descarga directa compatible
-    url_hoja = st.secrets["url_hoja"]
-    if "/edit" in url_hoja:
-        return url_hoja.split("/edit")[0] + "/export?format=csv"
-    return url_hoja
-
 def obtener_gastos():
     try:
-        csv_url = obtener_url_csv()
-        df = pd.read_csv(csv_url)
-        if not df.empty and "Fecha" in df.columns:
-            df = df.dropna(subset=["Fecha"])
-            df['fecha_dt'] = pd.to_datetime(df['Fecha'], format='%d/%m/%Y', errors='coerce')
-            df['Importe'] = pd.to_numeric(df['Importe'], errors='coerce')
-            return df
+        url_script = st.secrets["url_script"]
+        # Solicitamos los datos en tiempo real al script de Google
+        response = requests.get(url_script)
+        if response.status_code == 200:
+            datos = response.json()
+            df = pd.DataFrame(datos)
+            if not df.empty and "Fecha" in df.columns:
+                df['fecha_dt'] = pd.to_datetime(df['Fecha'], format='%d/%m/%Y', errors='coerce')
+                df['Importe'] = pd.to_numeric(df['Importe'], errors='coerce')
+                return df
     except Exception:
-        pass
+        # Alternativa de lectura directa por CSV si el script no responde a la primera
+        try:
+            url_hoja = st.secrets["url_hoja"]
+            csv_url = url_hoja.split("/edit")[0] + "/export?format=csv"
+            df = pd.read_csv(csv_url)
+            if not df.empty:
+                # Si viene del CSV directo, forzamos nombres de columnas estándar
+                df.columns = ["Fecha", "Tipo de Gasto", "Concepto", "Importe", "Comentario"] + list(df.columns[5:])[:0]
+                df = df.dropna(subset=["Fecha"])
+                df['fecha_dt'] = pd.to_datetime(df['Fecha'], format='%d/%m/%Y', errors='coerce')
+                df['Importe'] = pd.to_numeric(df['Importe'], errors='coerce')
+                return df
+        except Exception:
+            pass
     return pd.DataFrame()
 
 def guardar_gasto(fecha, tipo_gasto, concepto, importe, comentario):
-    # Método alternativo directo: usa la API de publicación web de Google Sheets
-    url_hoja = st.secrets["url_hoja"]
-    # Extraemos el ID único del documento para conectar de forma nativa
-    sheet_id = url_hoja.split("/d/")[1].split("/")[0]
-    
-    # Construimos una petición nativa estructurada
-    df_existente = obtener_gastos()
-    nuevo_gasto = pd.DataFrame([{
-        "Fecha": fecha.strftime("%d/%m/%Y"),
-        "Tipo de Gasto": tipo_gasto,
-        "Concepto": concepto,
-        "Importe": float(importe),
-        "Comentario": comentario if comentario else ""
-    }])
-    
-    # Informamos a Streamlit que use el sistema de sincronización asíncrona
-    # Para este envío simplificado y público, avísame si requiere el Script secundario.
-    st.info("Para activar la escritura directa anual, introduce el gasto de prueba ahora.")
+    url_script = st.secrets["url_script"]
+    payload = {
+        "fecha": fecha.strftime("%d/%m/%Y"),
+        "tipo": tipo_gasto,
+        "concepto": concepto,
+        "importe": float(importe),
+        "comentario": comentario if comentario else ""
+    }
+    # Enviamos los datos directamente por POST al script receptor sin intermediarios
+    requests.post(url_script, data=json.dumps(payload))
 
 st.title("💰 Control de Gastos de la Familia")
 menu = st.sidebar.radio("Navegación", ["1. Registrar Gasto", "2. Estadísticas y Gráficos"])
 
+# --- APARTADO 1: FORMULARIO DINÁMICO ---
 if menu == "1. Registrar Gasto":
     st.header("📝 Registrar Nuevo Gasto")
     
@@ -80,20 +84,31 @@ if menu == "1. Registrar Gasto":
         
         if boton_enviar:
             if importe > 0:
-                guardar_gasto(fecha, tipo_gasto, concepto, importe, comentario)
-                st.success(f"✅ Gasto procesado correctamente para sincronización anual.")
+                try:
+                    guardar_gasto(fecha, tipo_gasto, concepto, importe, comentario)
+                    st.success(f"✅ Gasto guardado correctamente en la hoja anual.")
+                    st.toast("¡Sincronizado!")
+                except Exception as e:
+                    st.error("Error al enviar los datos a Google Sheets. Revisa la URL del Script.")
             else:
                 st.error("⚠️ El importe debe ser mayor que 0")
 
+# --- APARTADO 2: ESTADÍSTICAS Y GRÁFICOS ---
 elif menu == "2. Estadísticas y Gráficos":
     st.header("📊 Análisis de Gastos en Tiempo Real")
     df = obtener_gastos()
     
-    if df.empty:
-        st.info("Aún no hay gastos registrados visibles en la hoja sincronizada.")
+    if df.empty or 'fecha_dt' not in df or df['fecha_dt'].isna().all():
+        st.info("Aún no hay gastos registrados visibles en la hoja sincronizada. Prueba a registrar tu primer gasto.")
     else:
         st.subheader("🔍 Filtros de Búsqueda")
         col_f1, col_f2, col_f3 = st.columns(3)
+        
+        # Normalizamos los nombres de las columnas para evitar conflictos de mayúsculas/minúsculas entre el Script y el CSV
+        t_col = "Tipo de Gasto" if "Tipo de Gasto" in df.columns else "tipo" if "tipo" in df.columns else df.columns[1]
+        c_col = "Concepto" if "Concepto" in df.columns else "concepto" if "concepto" in df.columns else df.columns[2]
+        i_col = "Importe" if "Importe" in df.columns else "importe" if "importe" in df.columns else df.columns[3]
+        com_col = "Comentario" if "Comentario" in df.columns else "comentario" if "comentario" in df.columns else df.columns[4]
         
         with col_f1:
             fecha_min = min(df['fecha_dt']).date()
@@ -101,10 +116,10 @@ elif menu == "2. Estadísticas y Gráficos":
             rango_fechas = st.date_input("Rango de Fechas", [fecha_min, fecha_max], format="DD/MM/YYYY")
             
         with col_f2:
-            tipos_seleccionados = st.multiselect("Filtrar por Tipo de Gasto", options=df['Tipo de Gasto'].unique(), default=df['Tipo de Gasto'].unique())
+            tipos_seleccionados = st.multiselect("Filtrar por Tipo de Gasto", options=df[t_col].unique(), default=df[t_col].unique())
             
         with col_f3:
-            conceptos_filtrados = df[df['Tipo de Gasto'].isin(tipos_seleccionados)]['Concepto'].unique()
+            conceptos_filtrados = df[df[t_col].isin(tipos_seleccionados)][c_col].unique()
             conceptos_seleccionados = st.multiselect("Filtrar por Concepto", options=conceptos_filtrados, default=conceptos_filtrados)
             
         if len(rango_fechas) == 2:
@@ -113,10 +128,10 @@ elif menu == "2. Estadísticas y Gráficos":
         else:
             df_filtrado = df.copy()
             
-        df_filtrado = df_filtrado[df_filtrado['Tipo de Gasto'].isin(tipos_seleccionados)]
-        df_filtrado = df_filtrado[df_filtrado['Concepto'].isin(conceptos_seleccionados)]
+        df_filtrado = df_filtrado[df_filtrado[t_col].isin(tipos_seleccionados)]
+        df_filtrado = df_filtrado[df_filtrado[c_col].isin(conceptos_seleccionados)]
         
-        total_gastado = df_filtrado['Importe'].sum()
+        total_gastado = df_filtrado[i_col].sum()
         st.metric(label="Total Gastado en Periodo Seleccionado", value=f"{total_gastado:,.2f} €")
         
         st.subheader("📈 Gráficos Visuales")
@@ -124,16 +139,29 @@ elif menu == "2. Estadísticas y Gráficos":
         
         with col_g1:
             st.markdown("**Gasto por Tipo de Gasto**")
-            fig_tipo = px.pie(df_filtrado, values='Importe', names='Tipo de Gasto', hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel)
+            fig_tipo = px.pie(df_filtrado, values=i_col, names=t_col, hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel)
             st.plotly_chart(fig_tipo, use_container_width=True)
             
         with col_g2:
             st.markdown("**Gasto por Concepto**")
-            fig_concepto = px.bar(df_filtrado.groupby('Concepto')['Importe'].sum().reset_index(), 
-                                  x='Concepto', y='Importe', color='Concepto', text_auto='.2s')
+            fig_concepto = px.bar(df_filtrado.groupby(c_col)[i_col].sum().reset_index(), 
+                                  x=c_col, y=i_col, color=c_col, text_auto='.2s')
             st.plotly_chart(fig_concepto, use_container_width=True)
             
         st.subheader("📋 Historial de Datos Filtrados")
-        df_vista = df_filtrado[['Fecha', 'Tipo de Gasto', 'Concepto', 'Importe', 'Comentario']]
+        df_vista = df_filtrado[['Fecha', t_col, c_col, i_col, com_col]].rename(
+            columns={t_col: 'Tipo de Gasto', c_col: 'Concepto', i_col: 'Importe (€)', com_col: 'Comentario'}
+        )
         st.dataframe(df_vista, use_container_width=True, hide_index=True)
-
+        
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df_vista.to_excel(writer, index=False, sheet_name='Gastos_Familia')
+        excel_data = output.getvalue()
+        
+        st.download_button(
+            label="📥 Exportar estos datos a Excel",
+            data=excel_data,
+            file_name=f"gastos_familia_{datetime.now().strftime('%d_%m_%Y')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
