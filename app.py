@@ -17,7 +17,7 @@ if "autenticado" not in st.session_state:
 
 if not st.session_state["autenticado"]:
     st.markdown("<br><br>", unsafe_allow_html=True)
-    col_login, _ = st.columns([2, 3])
+    col_login, _ = st.columns([1, 2])
     with col_login:
         with st.container(border=True):
             st.subheader("🔒 Acceso de la Familia")
@@ -44,13 +44,20 @@ CATEGORIAS = {
 def obtener_gastos():
     try:
         url_hoja = st.secrets["url_hoja"]
-        # Convertimos el enlace web normal en un enlace de descarga CSV directa
-        csv_url = url_hoja.split("/edit")[0] + "/export?format=csv"
+        # Convertimos respetando el #gid=XXXX final de la pestaña del formulario
+        if "#gid=" in url_hoja:
+            partes = url_hoja.split("/edit#gid=")
+            csv_url = partes[0] + "/export?format=csv&gid=" + partes[1]
+        else:
+            csv_url = url_hoja.split("/edit")[0] + "/export?format=csv"
+            
         df = pd.read_csv(csv_url)
         
         if df is not None and not df.empty:
-            # CORRECCIÓN CLAVE: Forzamos los nombres de las columnas por posición, ignorando lo que haya escrito Google
-            df.columns = ["Fecha", "Tipo de Gasto", "Concepto", "Importe", "Comentario"] + list(df.columns[5:])[:0]
+            # Forzamos los nombres omitiendo la columna de "Marca temporal" que añade Google Forms automáticamente
+            if len(df.columns) >= 6:
+                df = df.iloc[:, 1:6] # Nos saltamos la columna de hora automática de Google
+            df.columns = ["Fecha", "Tipo de Gasto", "Concepto", "Importe", "Comentario"]
             df = df.dropna(subset=["Fecha"])
             df['fecha_dt'] = pd.to_datetime(df['Fecha'], format='%d/%m/%Y', errors='coerce')
             df['Importe'] = pd.to_numeric(df['Importe'], errors='coerce')
