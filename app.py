@@ -17,7 +17,7 @@ if "autenticado" not in st.session_state:
 
 if not st.session_state["autenticado"]:
     st.markdown("<br><br>", unsafe_allow_html=True)
-    col_login, _ = st.columns()
+    col_login, _ = st.columns([1, 2])
     with col_login:
         with st.container(border=True):
             st.subheader("🔒 Acceso de la Familia")
