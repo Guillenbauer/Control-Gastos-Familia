@@ -17,7 +17,7 @@ if "autenticado" not in st.session_state:
 
 if not st.session_state["autenticado"]:
     st.markdown("<br><br>", unsafe_allow_html=True)
-    col_login, _ = st.columns([1, 2])
+    col_login, _ = st.columns([1, 1]) # Corregido con especificación de dimensiones
     with col_login:
         with st.container(border=True):
             st.subheader("🔒 Acceso de la Familia")
@@ -43,25 +43,24 @@ CATEGORIAS = {
 
 def obtener_gastos():
     try:
-        url_hoja = st.secrets["url_hoja"]
-        # Convertimos respetando el #gid=XXXX final de la pestaña del formulario
-        if "#gid=" in url_hoja:
-            partes = url_hoja.split("/edit#gid=")
-            csv_url = partes[0] + "/export?format=csv&gid=" + partes[1]
-        else:
-            csv_url = url_hoja.split("/edit")[0] + "/export?format=csv"
-            
-        df = pd.read_csv(csv_url)
-        
-        if df is not None and not df.empty:
-            # Forzamos los nombres omitiendo la columna de "Marca temporal" que añade Google Forms automáticamente
-            if len(df.columns) >= 6:
-                df = df.iloc[:, 1:6] # Nos saltamos la columna de hora automática de Google
-            df.columns = ["Fecha", "Tipo de Gasto", "Concepto", "Importe", "Comentario"]
-            df = df.dropna(subset=["Fecha"])
-            df['fecha_dt'] = pd.to_datetime(df['Fecha'], format='%d/%m/%Y', errors='coerce')
-            df['Importe'] = pd.to_numeric(df['Importe'], errors='coerce')
-            return df
+        url_script = st.secrets["url_script"]
+        # SOLUCIÓN DE RAÍZ: Llamamos directamente a tu Apps Script para leer las celdas
+        response = requests.get(url_script, timeout=10)
+        if response.status_code == 200:
+            datos = response.json()
+            if datos and len(datos) > 0:
+                df = pd.DataFrame(datos)
+                # Google Forms genera automáticamente una columna de hora ("Marca temporal" o similar) como primera columna.
+                # Si el script devuelve esa columna extra, la limpiamos para quedarnos solo con vuestros 5 campos.
+                if len(df.columns) >= 6:
+                    df = df.iloc[:, 1:6]
+                
+                # Forzamos los nombres de columna correctos para mapear los gráficos
+                df.columns = ["Fecha", "Tipo de Gasto", "Concepto", "Importe", "Comentario"]
+                df = df.dropna(subset=["Fecha"])
+                df['fecha_dt'] = pd.to_datetime(df['Fecha'], format='%d/%m/%Y', errors='coerce')
+                df['Importe'] = pd.to_numeric(df['Importe'], errors='coerce')
+                return df
     except Exception:
         pass
     return pd.DataFrame()
@@ -75,7 +74,7 @@ def guardar_gasto(fecha, tipo_gasto, concepto, importe, comentario):
         "importe": float(importe),
         "comentario": comentario if comentario else ""
     }
-    requests.post(url_script, data=json.dumps(payload))
+    requests.post(url_script, data=json.dumps(payload), timeout=10)
 
 st.title("💰 Control de Gastos de la Familia")
 menu = st.sidebar.radio("Navegación", ["1. Registrar Gasto", "2. Estadísticas y Gráficos"])
@@ -106,7 +105,7 @@ if menu == "1. Registrar Gasto":
                     guardar_gasto(fecha, tipo_gasto, concepto, importe, comentario)
                     st.success(f"✅ ¡Gasto registrado y enviado a tu Google Sheets con éxito!")
                     st.toast("Sincronizado")
-                except Exception as e:
+                except Exception:
                     st.error("Error al enviar los datos a Google Sheets.")
             else:
                 st.error("⚠️ El importe debe ser mayor que 0")
@@ -116,7 +115,7 @@ elif menu == "2. Estadísticas y Gráficos":
     df = obtener_gastos()
     
     if df.empty or 'fecha_dt' not in df or df['fecha_dt'].isna().all():
-        st.info("Aún no hay gastos registrados visibles en tu Google Sheets. Registra tu primer gasto en la pestaña 1.")
+        st.info("Aún no hay gastos registrados visibles en tu Google Sheets o el sistema está sincronizando la pestaña. Registra tu primer gasto en la pestaña 1.")
     else:
         st.subheader("🔍 Filtros de Búsqueda")
         col_f1, col_f2, col_f3 = st.columns(3)
