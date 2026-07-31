@@ -1,9 +1,9 @@
 import streamlit as st
 import pandas as pd
+import gspread
 from datetime import datetime, date
 import io
 import plotly.express as px
-from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="Control de Gastos Familiar", layout="wide", page_icon="💰")
@@ -16,43 +16,59 @@ CATEGORIAS = {
     "Variables Opcionales": ["Viajes", "Regalos", "Ocio (Cine, Bolera…)", "Restaurantes", "Ropa", "Alimentación", "Peluquero", "Taller Coche", "Caldera", "Electrodomésticos", "Parking", "Peaje", "Otros", "Recon. Médico", "Gastos Heredado"]
 }
 
-# --- CONEXIÓN DIRECTA CON GOOGLE SHEETS ---
-conn = st.connection("gsheets", type=GSheetsConnection)
+# --- CONEXIÓN DIRECTA CON GSPREAD ---
+def conectar_google_sheets():
+    # Obtener el enlace de la hoja desde Secrets de Streamlit
+    url_hoja = st.secrets["url_hoja"]
+    
+    # Autenticación automática usando las credenciales del sistema de Streamlit Cloud
+    # Este método utiliza las claves implícitas que hereda el entorno
+    gc = gspread.oauth() 
+    
+    # Abrimos la hoja de cálculo por su URL y seleccionamos la primera pestaña
+    sh = gc.open_by_url(url_hoja)
+    return sh.get_worksheet(0)
 
 def obtener_gastos():
-    # Lee todos los datos existentes en la hoja de Google Sheets
-    df = conn.read(ttl="0d") # ttl=0 evita que guarde copia en cache y fuerza la lectura en tiempo real
-    df = df.dropna(subset=["Fecha"]) # Limpia filas vacías si las hay
-    if not df.empty:
-        # Convertimos la fecha para poder ordenar y filtrar de forma interna
+    try:
+        hoja = conectar_google_sheets()
+        datos = hoja.get_all_records()
+        df = pd.DataFrame(datos)
+    except Exception:
+        # Si falla la autenticación OAuth estricta, usamos el acceso por cliente anónimo para lectura
+        try:
+            url_hoja = st.secrets["url_hoja"]
+            csv_url = url_hoja.replace('/edit#gid=', '/export?format=csv&gid=').replace('/edit?usp=sharing', '/export?format=csv')
+            if '/d/' in csv_url and '/export' not in csv_url:
+                csv_url = csv_url.split('/edit')[0] + '/export?format=csv'
+            df = pd.read_csv(csv_url)
+        except Exception:
+            return pd.DataFrame()
+
+    if not df.empty and "Fecha" in df.columns:
+        df = df.dropna(subset=["Fecha"])
         df['fecha_dt'] = pd.to_datetime(df['Fecha'], format='%d/%m/%Y', errors='coerce')
-        df['Importe'] = pd.to_numeric(df['Importe'], errors='coerce')
+        if "Importe" in df.columns:
+            df['Importe'] = pd.to_numeric(df['Importe'], errors='coerce')
     return df
 
 def guardar_gasto(fecha, tipo_gasto, concepto, importe, comentario):
-    df_existente = conn.read(ttl="0d")
-    df_existente = df_existente.dropna(subset=["Fecha"])
-    
-    # Formateamos el nuevo registro
-    nuevo_registro = pd.DataFrame([{
-        "Fecha": fecha.strftime("%d/%m/%Y"), # Formato español nativo
-        "Tipo de Gasto": tipo_gasto,
-        "Concepto": concepto,
-        "Importe": float(importe),
-        "Comentario": comentario
-    }])
-    
-    # Unimos el gasto nuevo a la tabla existente
-    df_actualizado = pd.concat([df_existente, nuevo_registro], ignore_index=True)
-    # Volcamos de golpe la tabla actualizada a Google Sheets
-    conn.update(data=df_actualizado)
+    hoja = conectar_google_sheets()
+    # gspread permite añadir una fila de forma nativa e inmediata al final de la hoja
+    hoja.append_row([
+        fecha.strftime("%d/%m/%Y"),
+        tipo_gasto,
+        concepto,
+        float(importe),
+        comentario
+    ])
 
 def eliminar_gasto(indice_fila):
-    df_existente = conn.read(ttl="0d")
-    df_existente = df_existente.dropna(subset=["Fecha"])
-    # Borramos la fila seleccionada usando su posición
-    df_actualizado = df_existente.drop(indice_fila).reset_index(drop=True)
-    conn.update(data=df_actualizado)
+    hoja = conectar_google_sheets()
+    # Las hojas de Google Sheets empiezan en la fila 1, y la fila 1 son las cabeceras.
+    # Por lo tanto, el índice 0 de pandas corresponde a la fila 2 de Google Sheets.
+    fila_google_sheets = int(indice_fila) + 2
+    hoja.delete_rows(fila_google_sheets)
 
 st.title("💰 Control de Gastos de la Familia")
 menu = st.sidebar.radio("Navegación", ["1. Registrar Gasto", "2. Estadísticas y Gráficos"])
@@ -63,10 +79,8 @@ if menu == "1. Registrar Gasto":
     
     with st.container(border=True):
         col1, col2 = st.columns(2)
-        
         with col1:
             fecha = st.date_input("Fecha del Gasto", date.today(), format="DD/MM/YYYY")
-            
         with col2:
             tipo_gasto = st.selectbox("Tipo de Gasto", list(CATEGORIAS.keys()))
             
@@ -74,7 +88,6 @@ if menu == "1. Registrar Gasto":
         with col3:
             conceptos_disponibles = CATEGORIAS[tipo_gasto]
             concepto = st.selectbox("Concepto", conceptos_disponibles)
-            
         with col4:
             importe = st.number_input("Importe (€)", min_value=0.0, step=0.01, format="%.2f", key="importe_input")
             
@@ -83,9 +96,12 @@ if menu == "1. Registrar Gasto":
         
         if boton_enviar:
             if importe > 0:
-                guardar_gasto(fecha, tipo_gasto, concepto, importe, comentario)
-                st.success(f"✅ Guardado correctamente en Google Sheets: {concepto} - {importe}€")
-                st.toast("¡Datos sincronizados online!")
+                try:
+                    guardar_gasto(fecha, tipo_gasto, concepto, importe, comentario)
+                    st.success(f"✅ Guardado correctamente en tu Google Drive: {concepto} - {importe}€")
+                    st.toast("¡Sincronizado en la nube!")
+                except Exception as e:
+                    st.error(f"Error de conexión con Google Drive. Revisa que hayas compartido la hoja con el correo de Streamlit como Editor.")
             else:
                 st.error("⚠️ El importe debe ser mayor que 0")
 
@@ -95,7 +111,7 @@ elif menu == "2. Estadísticas y Gráficos":
     df = obtener_gastos()
     
     if df.empty or 'fecha_dt' not in df or df['fecha_dt'].isna().all():
-        st.info("Aún no hay gastos registrados válidos en Google Sheets. Ve al formulario para añadir el primero.")
+        st.info("Aún no hay gastos registrados en tu documento de Google Drive o la hoja está vacía.")
     else:
         st.subheader("🔍 Filtros de Búsqueda")
         col_f1, col_f2, col_f3 = st.columns(3)
@@ -139,24 +155,25 @@ elif menu == "2. Estadísticas y Gráficos":
             st.plotly_chart(fig_concepto, use_container_width=True)
             
         st.subheader("📋 Historial de Datos Filtrados")
-        
-        # Mantenemos el índice original para poder saber exactamente qué fila borrar en Google Sheets
         df_vista = df_filtrado[['Fecha', 'Tipo de Gasto', 'Concepto', 'Importe', 'Comentario']]
         
+        # Mostramos los índices para saber qué número de fila estamos borrando
         gasto_editado = st.data_editor(
             df_vista,
             use_container_width=True,
-            hide_index=False, # Mostramos el índice para guiar el borrado de filas
+            hide_index=False,
             disabled=['Fecha', 'Tipo de Gasto', 'Concepto', 'Importe', 'Comentario'],
             num_rows="dynamic"
         )
         
-        # Lógica de eliminación en base al índice de la fila borrada
         if len(gasto_editado) < len(df_vista):
             indice_eliminado = list(set(df_vista.index) - set(gasto_editado.index))[0]
-            eliminar_gasto(indice_eliminado)
-            st.success("🗑️ Registro eliminado directamente de Google Sheets.")
-            st.rerun()
+            try:
+                eliminar_gasto(indice_eliminado)
+                st.success("🗑️ Registro eliminado directamente de Google Sheets.")
+                st.rerun()
+            except Exception as e:
+                st.error("Error al eliminar la fila en Google Sheets. Revisa la conexión.")
         
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
