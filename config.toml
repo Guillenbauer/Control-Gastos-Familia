@@ -1,0 +1,6 @@
+[theme]
+primaryColor = "#FF4B4B"
+
+[browser]
+# Esto define el icono que se verá en la pestaña y al instalar la app
+gatherUsageStats = false
