@@ -17,7 +17,7 @@ if "autenticado" not in st.session_state:
 
 if not st.session_state["autenticado"]:
     st.markdown("<br><br>", unsafe_allow_html=True)
-    col_login, _ = st.columns([1, 2])
+    col_login, _ = st.columns([2, 3])
     with col_login:
         with st.container(border=True):
             st.subheader("🔒 Acceso de la Familia")
@@ -43,32 +43,20 @@ CATEGORIAS = {
 
 def obtener_gastos():
     try:
-        url_script = st.secrets["url_script"]
-        response = requests.get(url_script)
-        if response.status_code == 200:
-            datos = response.json()
-            df = pd.DataFrame(datos)
-            if not df.empty:
-                # Estandarizamos los nombres de las columnas que devuelve Google
-                df.columns = ["Fecha", "Tipo de Gasto", "Concepto", "Importe", "Comentario"] + list(df.columns[5:])[:0]
-                df = df.dropna(subset=["Fecha"])
-                df['fecha_dt'] = pd.to_datetime(df['Fecha'], format='%d/%m/%Y', errors='coerce')
-                df['Importe'] = pd.to_numeric(df['Importe'], errors='coerce')
-                return df
+        url_hoja = st.secrets["url_hoja"]
+        # Convertimos el enlace web normal en un enlace de descarga CSV directa
+        csv_url = url_hoja.split("/edit")[0] + "/export?format=csv"
+        df = pd.read_csv(csv_url)
+        
+        if df is not None and not df.empty:
+            # CORRECCIÓN CLAVE: Forzamos los nombres de las columnas por posición, ignorando lo que haya escrito Google
+            df.columns = ["Fecha", "Tipo de Gasto", "Concepto", "Importe", "Comentario"] + list(df.columns[5:])[:0]
+            df = df.dropna(subset=["Fecha"])
+            df['fecha_dt'] = pd.to_datetime(df['Fecha'], format='%d/%m/%Y', errors='coerce')
+            df['Importe'] = pd.to_numeric(df['Importe'], errors='coerce')
+            return df
     except Exception:
-        # Alternativa de lectura directa por CSV si el script está saturado
-        try:
-            url_hoja = st.secrets["url_hoja"]
-            csv_url = url_hoja.split("/edit")[0] + "/export?format=csv"
-            df = pd.read_csv(csv_url)
-            if not df.empty:
-                df.columns = ["Fecha", "Tipo de Gasto", "Concepto", "Importe", "Comentario"] + list(df.columns[5:])[:0]
-                df = df.dropna(subset=["Fecha"])
-                df['fecha_dt'] = pd.to_datetime(df['Fecha'], format='%d/%m/%Y', errors='coerce')
-                df['Importe'] = pd.to_numeric(df['Importe'], errors='coerce')
-                return df
-        except Exception:
-            pass
+        pass
     return pd.DataFrame()
 
 def guardar_gasto(fecha, tipo_gasto, concepto, importe, comentario):
@@ -80,7 +68,6 @@ def guardar_gasto(fecha, tipo_gasto, concepto, importe, comentario):
         "importe": float(importe),
         "comentario": comentario if comentario else ""
     }
-    # gspread/requests envía directamente el JSON al script receptor de Google sin restricciones de la librería
     requests.post(url_script, data=json.dumps(payload))
 
 st.title("💰 Control de Gastos de la Familia")
@@ -113,7 +100,7 @@ if menu == "1. Registrar Gasto":
                     st.success(f"✅ ¡Gasto registrado y enviado a tu Google Sheets con éxito!")
                     st.toast("Sincronizado")
                 except Exception as e:
-                    st.error("Error al enviar los datos a Google Sheets. Revisa la URL de tu Script.")
+                    st.error("Error al enviar los datos a Google Sheets.")
             else:
                 st.error("⚠️ El importe debe ser mayor que 0")
 
