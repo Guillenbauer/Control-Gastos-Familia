@@ -3,13 +3,12 @@ import pandas as pd
 from datetime import datetime, date
 import io
 import plotly.express as px
-import requests
+from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="Control de Gastos Familiar", layout="wide", page_icon="💰")
 
 # --- CONTROL DE ACCESO / CONTRASEÑA ---
-# Puedes cambiar "Familia2026" por la contraseña que tú prefieras
 CONTRASEÑA_CORRECTA = "FamiliaGSPA2026"
 
 if "autenticado" not in st.session_state:
@@ -31,7 +30,7 @@ if not st.session_state["autenticado"]:
                     st.rerun()
                 else:
                     st.error("⚠️ Contraseña incorrecta. Inténtalo de nuevo.")
-    st.stop() # Detiene la carga del resto de la aplicación si no se ha puesto la contraseña
+    st.stop()
 
 # --- CATEGORÍAS DE GASTOS ---
 CATEGORIAS = {
@@ -41,14 +40,18 @@ CATEGORIAS = {
     "Variables Opcionales": ["Viajes", "Regalos", "Ocio (Cine, Bolera…)", "Restaurantes", "Ropa", "Alimentación", "Peluquero", "Taller Coche", "Caldera", "Electrodomésticos", "Parking", "Peaje", "Otros", "Recon. Médico", "Gastos Heredado"]
 }
 
+# --- CONEXIÓN DIRECTA CON GOOGLE SHEETS ---
+conn = st.connection("gsheets", type=GSheetsConnection)
+
 def obtener_gastos():
     try:
-        url_hoja = st.secrets["url_hoja"]
-        csv_url = url_hoja.split("/edit") + "/export?format=csv"
-        df = pd.read_csv(csv_url)
-        if not df.empty:
+        # Forzamos la lectura en tiempo real del documento de Google
+        df = conn.read(ttl="0d")
+        if df is not None and not df.empty:
+            # Limpiamos filas vacías si las hay
+            df = df.dropna(subset=[df.columns[0]])
+            # Forzamos nombres de columnas estándar para la lógica interna de gráficos
             df.columns = ["Fecha", "Tipo de Gasto", "Concepto", "Importe", "Comentario"] + list(df.columns[5:])[:0]
-            df = df.dropna(subset=["Fecha"])
             df['fecha_dt'] = pd.to_datetime(df['Fecha'], format='%d/%m/%Y', errors='coerce')
             df['Importe'] = pd.to_numeric(df['Importe'], errors='coerce')
             return df
@@ -57,13 +60,26 @@ def obtener_gastos():
     return pd.DataFrame()
 
 def guardar_gasto(fecha, tipo_gasto, concepto, importe, comentario):
-    st.session_state["gasto_pendiente"] = {
+    # 1. Leemos lo que ya hay en Google Sheets para no machacarlo
+    df_existente = conn.read(ttl="0d")
+    if df_existente is not None and not df_existente.empty:
+        df_existente = df_existente.dropna(subset=[df_existente.columns[0]])
+        df_existente.columns = ["Fecha", "Tipo de Gasto", "Concepto", "Importe", "Comentario"] + list(df_existente.columns[5:])[:0]
+    else:
+        df_existente = pd.DataFrame(columns=["Fecha", "Tipo de Gasto", "Concepto", "Importe", "Comentario"])
+
+    # 2. Creamos la fila del nuevo gasto familiar
+    nuevo_registro = pd.DataFrame([{
         "Fecha": fecha.strftime("%d/%m/%Y"),
         "Tipo de Gasto": tipo_gasto,
         "Concepto": concepto,
         "Importe": float(importe),
         "Comentario": comentario if comentario else ""
-    }
+    }])
+    
+    # 3. Concatenamos la lista y la subimos en bloque actualizando la hoja
+    df_actualizado = pd.concat([df_existente, nuevo_registro], ignore_index=True)
+    conn.update(data=df_actualizado)
 
 st.title("💰 Control de Gastos de la Familia")
 menu = st.sidebar.radio("Navegación", ["1. Registrar Gasto", "2. Estadísticas y Gráficos"])
@@ -90,9 +106,12 @@ if menu == "1. Registrar Gasto":
         
         if boton_enviar:
             if importe > 0:
-                guardar_gasto(fecha, tipo_gasto, concepto, importe, comentario)
-                st.success(f"✅ ¡Gasto procesado! Se verá reflejado en tus estadísticas anuales al instante.")
-                st.toast("Sincronizado de forma segura")
+                try:
+                    guardar_gasto(fecha, tipo_gasto, concepto, importe, comentario)
+                    st.success(f"✅ ¡Gasto volcado y guardado en Google Sheets con éxito!")
+                    st.toast("Sincronización completada")
+                except Exception as e:
+                    st.error("Error al escribir en Google Sheets. Comprueba que en los Secrets de Streamlit la palabra esté escrita como 'spreadsheet' y el enlace sea el de tu barra de direcciones.")
             else:
                 st.error("⚠️ El importe debe ser mayor que 0")
 
@@ -100,13 +119,8 @@ elif menu == "2. Estadísticas y Gráficos":
     st.header("📊 Análisis de Gastos en Tiempo Real")
     df = obtener_gastos()
     
-    if "gasto_pendiente" in st.session_state:
-        nuevo_df = pd.DataFrame([st.session_state["gasto_pendiente"]])
-        nuevo_df['fecha_dt'] = pd.to_datetime(nuevo_df['Fecha'], format='%d/%m/%Y')
-        df = pd.concat([df, nuevo_df], ignore_index=True) if not df.empty else nuevo_df
-
     if df.empty or 'fecha_dt' not in df or df['fecha_dt'].isna().all():
-        st.info("Aún no hay gastos registrados visibles en la hoja sincronizada. Prueba a registrar tu primer gasto.")
+        st.info("Aún no hay gastos registrados visibles en tu Google Sheets. Registra tu primer gasto en la pestaña 1.")
     else:
         st.subheader("🔍 Filtros de Búsqueda")
         col_f1, col_f2, col_f3 = st.columns(3)
@@ -117,7 +131,6 @@ elif menu == "2. Estadísticas y Gráficos":
             rango_fechas = st.date_input("Rango de Fechas", [fecha_min, fecha_max], format="DD/MM/YYYY")
             
         with col_f2:
-            # CORREGIDO: Comillas emparejadas correctamente para evitar el SyntaxError
             tipos_seleccionados = st.multiselect("Filtrar por Tipo de Gasto", options=df["Tipo de Gasto"].unique(), default=df["Tipo de Gasto"].unique())
             
         with col_f3:
@@ -165,3 +178,4 @@ elif menu == "2. Estadísticas y Gráficos":
             file_name=f"gastos_familia_{datetime.now().strftime('%d_%m_%Y')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
+
