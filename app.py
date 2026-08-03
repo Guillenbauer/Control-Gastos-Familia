@@ -27,7 +27,9 @@ def verificar_password():
 if verificar_password():
 
     # Conexión con Google Sheets
-    conn = st.connection("gsheets", type="gsheets")
+    from streamlit_gsheets import GSheetsConnection
+
+    conn = st.connection("gsheets", type=GSheetsConnection)
 
     # ==========================================
     # 2. DICCIONARIO DE CONCEPTOS CONDICIONALES
