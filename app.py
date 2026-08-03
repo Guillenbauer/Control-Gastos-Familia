@@ -32,13 +32,26 @@ if verificar_password():
     conn = st.connection("gsheets", type=GSheetsConnection)
 
     # ==========================================
-    # 2. DICCIONARIO DE CONCEPTOS CONDICIONALES
+    # 2. DICCIONARIO DE CONCEPTOS CONDICIONALES (TUS DATOS REALES)
     # ==========================================
     OPCIONES_CONCEPTOS = {
-        "Fijos Básicos": ["Hipotecos/Alquiler", "Luz", "Agua", "Gas", "Internet/Móvil", "Supermercado"],
-        "Fijos Opcionales": ["Gimnasio", "Suscripciones (Netflix, Spotify...)", "Seguros opcionales"],
-        "Variables Básicos": ["Farmacia/Salud", "Ropa necesaria", "Mantenimiento coche/Hogar", "Imprevistos"],
-        "Variables Opcionales": ["Restaurantes/Ocio", "Viajes/Vacaciones", "Caprichos", "Regalos"]
+        "Fijos_Básicos": [
+            "Hipoteca", "Colegio (La Salle)", "Guardería", 
+            "Comunidad", "Telefonía (O2)", "IBI"
+        ],
+        "Fijos_Opcionales": [
+            "Extraescolares", "Suscripciones", "Seguro Médico", "Alquiler Garaje"
+        ],
+        "Variables_Básicos": [
+            "Gasolina", "Luz", "Agua", "Gas", "Alimentación", 
+            "Farmacia", "Seguro Hogar", "Seguro Coche"
+        ],
+        "Variables_Opcionales": [
+            "Viajes", "Regalos", "Ocio (Cine, Bolera...)", "Restaurantes", 
+            "Ropa", "Alimentación", "Peluquero", "Taller Coche", 
+            "Caldera", "Electrodomésticos", "Parking", "Peaje", 
+            "Otros", "Recon. Médico", "Gastos Heredado"
+        ]
     }
 
     # ==========================================
@@ -48,46 +61,53 @@ if verificar_password():
     opcion_menu = st.sidebar.radio("Ir a:", ["Registrar Gasto", "Estadísticas y Histórico"])
 
     # ==========================================
-    # PANTALLA 1: REGISTRO DE GASTOS
+    # PANTALLA 1: REGISTRO DE GASTOS (REACTIVO)
     # ==========================================
     if opcion_menu == "Registrar Gasto":
         st.title("📝 Registro de Gastos")
 
-        with st.form("form_gastos", clear_on_submit=True):
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                fecha = st.date_input("Fecha", value=datetime.now(), format="DD/MM/YYYY")
-                tipo_gasto = st.selectbox("Tipo de Gasto", list(OPCIONES_CONCEPTOS.keys()))
-                conceptos_disponibles = OPCIONES_CONCEPTOS[tipo_gasto]
-                concepto = st.selectbox("Concepto", conceptos_disponibles)
+        col1, col2 = st.columns(2)
 
-            with col2:
+        with col1:
+            fecha = st.date_input("Fecha", value=datetime.now(), format="DD/MM/YYYY")
+            
+            # Al estar fuera del form, este selectbox reactualiza la página al instante
+            tipo_gasto = st.selectbox(
+                "Tipo de Gasto", 
+                list(OPCIONES_CONCEPTOS.keys()), 
+                key="tipo_gasto_select"
+            )
+            
+            # El concepto se actualiza en tiempo real según la elección
+            conceptos_disponibles = OPCIONES_CONCEPTOS[tipo_gasto]
+            concepto = st.selectbox("Concepto", conceptos_disponibles, key="concepto_select")
+
+        with col2:
+            # El resto de datos los metemos en un formulario para el envío final
+            with st.form("form_importe_comentarios", clear_on_submit=True):
                 importe = st.number_input("Importe (€)", min_value=0.0, step=0.01, format="%.2f")
                 comentarios = st.text_area("Comentarios (Opcional)", height=100)
+                submitted = st.form_submit_button("Guardar Gasto")
 
-            submitted = st.form_submit_button("Guardar Gasto")
-
-            if submitted:
-                if importe <= 0:
-                    st.warning("El importe debe ser mayor a 0 €.")
-                else:
-                    nuevo_gasto = pd.DataFrame([{
-                        "Fecha": fecha.strftime("%d/%m/%Y"),
-                        "Tipo de Gasto": tipo_gasto,
-                        "Concepto": concepto,
-                        "Importe (€)": importe,
-                        "Comentarios": comentarios
-                    }])
-                    
-                    try:
-                        df_existente = conn.read(ttl=0)
-                        df_actualizado = pd.concat([df_existente, nuevo_gasto], ignore_index=True)
-                        conn.update(data=df_actualizado)
-                        st.success("¡Gasto registrado con éxito!")
-                    except Exception as e:
-                        st.error(f"Error al guardar los datos: {e}")
-
+        if submitted:
+            if importe <= 0:
+                st.warning("El importe debe ser mayor a 0 €.")
+            else:
+                nuevo_gasto = pd.DataFrame([{
+                    "Fecha": fecha.strftime("%d/%m/%Y"),
+                    "Tipo de Gasto": tipo_gasto,
+                    "Concepto": concepto,
+                    "Importe (€)": importe,
+                    "Comentarios": comentarios
+                }])
+                
+                try:
+                    df_existente = conn.read(ttl=0)
+                    df_actualizado = pd.concat([df_existente, nuevo_gasto], ignore_index=True)
+                    conn.update(data=df_actualizado)
+                    st.success("¡Gasto registrado con éxito!")
+                except Exception as e:
+                    st.error(f"Error al guardar los datos: {e}")
     # ==========================================
     # PANTALLA 2: ESTADÍSTICAS E HISTÓRICO
     # ==========================================
