@@ -10,7 +10,7 @@ from streamlit_gsheets import GSheetsConnection
 # ==========================================
 st.set_page_config(
     page_title="Control de Gastos Familiar", 
-    page_icon="💰",
+    page_icon="icono.png",  # <-- Aquí cambias el emoji por tu imagen
     layout="centered"  # Ajustado a centrado para mejorar la vista en móviles
 )
 
