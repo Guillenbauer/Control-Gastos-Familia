@@ -16,7 +16,7 @@ def verificar_password():
         st.title("🔒 Acceso Restringido")
         pwd = st.text_input("Introduce la contraseña de acceso:", type="password")
         if st.button("Entrar"):
-            if pwd == "FamiliaGSPA2026"
+            if pwd == "FamiliaGSPA2026":
                 st.session_state.autenticado = True
                 st.rerun()
             else:
