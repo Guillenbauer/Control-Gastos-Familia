@@ -2,11 +2,17 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import io
+import plotly.express as px
+from streamlit_gsheets import GSheetsConnection
 
 # ==========================================
 # 1. CONFIGURACIÓN Y LOGIN
 # ==========================================
-st.set_page_config(page_title="Control de Gastos Familiar", layout="wide")
+st.set_page_config(
+    page_title="Control de Gastos Familiar", 
+    page_icon="💰",
+    layout="centered"  # Ajustado a centrado para mejorar la vista en móviles
+)
 
 def verificar_password():
     if "autenticado" not in st.session_state:
@@ -15,7 +21,7 @@ def verificar_password():
     if not st.session_state.autenticado:
         st.title("🔒 Acceso Restringido")
         pwd = st.text_input("Introduce la contraseña de acceso:", type="password")
-        if st.button("Entrar"):
+        if st.button("Entrar", use_container_width=True):
             if pwd == "FamiliaGSPA2026":
                 st.session_state.autenticado = True
                 st.rerun()
@@ -27,12 +33,10 @@ def verificar_password():
 if verificar_password():
 
     # Conexión con Google Sheets
-    from streamlit_gsheets import GSheetsConnection
-
     conn = st.connection("gsheets", type=GSheetsConnection)
 
     # ==========================================
-    # 2. DICCIONARIO DE CONCEPTOS CONDICIONALES (TUS DATOS REALES)
+    # 2. DICCIONARIOS Y OPCIONES
     # ==========================================
     OPCIONES_CONCEPTOS = {
         "Fijos_Básicos": [
@@ -54,40 +58,39 @@ if verificar_password():
         ]
     }
 
+    METODOS_PAGO = ["Tarjeta", "Efectivo", "Transferencia", "Bizum", "Otro"]
+
     # ==========================================
     # 3. NAVEGACIÓN LATERAL
     # ==========================================
-    st.sidebar.title("Navegación")
+    st.sidebar.title("📌 Menú")
     opcion_menu = st.sidebar.radio("Ir a:", ["Registrar Gasto", "Estadísticas y Histórico"])
 
     # ==========================================
-    # PANTALLA 1: REGISTRO DE GASTOS (REACTIVO)
+    # PANTALLA 1: REGISTRO DE GASTOS (MÓVIL / 1 COLUMNA)
     # ==========================================
     if opcion_menu == "Registrar Gasto":
-        st.title("📝 Registro de Gastos")
+        st.title("📝 Registrar Gasto")
 
-        col1, col2 = st.columns(2)
+        # Formulario estructurado verticalmente en 1 sola columna
+        fecha = st.date_input("Fecha", value=datetime.now(), format="DD/MM/YYYY")
 
-        with col1:
-            fecha = st.date_input("Fecha", value=datetime.now(), format="DD/MM/YYYY")
+        tipo_gasto = st.selectbox(
+            "Tipo de Gasto", 
+            list(OPCIONES_CONCEPTOS.keys()), 
+            key="tipo_gasto_select"
+        )
+
+        conceptos_disponibles = OPCIONES_CONCEPTOS[tipo_gasto]
+        concepto = st.selectbox("Concepto", conceptos_disponibles, key="concepto_select")
+
+        metodo_pago = st.selectbox("Método de Pago", METODOS_PAGO, key="metodo_pago_select")
+
+        with st.form("form_registro_gasto", clear_on_submit=True):
+            importe = st.number_input("Importe (€)", min_value=0.0, step=0.01, format="%.2f")
+            comentarios = st.text_area("Comentarios (Opcional)", height=80)
             
-            # Al estar fuera del form, este selectbox reactualiza la página al instante
-            tipo_gasto = st.selectbox(
-                "Tipo de Gasto", 
-                list(OPCIONES_CONCEPTOS.keys()), 
-                key="tipo_gasto_select"
-            )
-            
-            # El concepto se actualiza en tiempo real según la elección
-            conceptos_disponibles = OPCIONES_CONCEPTOS[tipo_gasto]
-            concepto = st.selectbox("Concepto", conceptos_disponibles, key="concepto_select")
-
-        with col2:
-            # El resto de datos los metemos en un formulario para el envío final
-            with st.form("form_importe_comentarios", clear_on_submit=True):
-                importe = st.number_input("Importe (€)", min_value=0.0, step=0.01, format="%.2f")
-                comentarios = st.text_area("Comentarios (Opcional)", height=100)
-                submitted = st.form_submit_button("Guardar Gasto")
+            submitted = st.form_submit_button("💾 Guardar Gasto", use_container_width=True)
 
         if submitted:
             if importe <= 0:
@@ -97,6 +100,7 @@ if verificar_password():
                     "Fecha": fecha.strftime("%d/%m/%Y"),
                     "Tipo de Gasto": tipo_gasto,
                     "Concepto": concepto,
+                    "Método de Pago": metodo_pago,
                     "Importe (€)": importe,
                     "Comentarios": comentarios
                 }])
@@ -108,22 +112,22 @@ if verificar_password():
                     st.success("¡Gasto registrado con éxito!")
                 except Exception as e:
                     st.error(f"Error al guardar los datos: {e}")
+
     # ==========================================
     # PANTALLA 2: ESTADÍSTICAS E HISTÓRICO
     # ==========================================
     elif opcion_menu == "Estadísticas y Histórico":
-        st.title("📊 Estadísticas e Histórico de Gastos")
+        st.title("📊 Estadísticas de Gastos")
 
         try:
             df_gastos = conn.read(ttl=0)
 
             if not df_gastos.empty and "Importe (€)" in df_gastos.columns:
-                # Formateo de tipos de datos
                 df_gastos["Importe (€)"] = pd.to_numeric(df_gastos["Importe (€)"], errors="coerce").fillna(0)
                 df_gastos["Fecha_dt"] = pd.to_datetime(df_gastos["Fecha"], format="%d/%m/%Y", errors="coerce")
 
-                # --- FILTRO POR RANGO DE FECHAS EN SIDEBAR ---
-                st.sidebar.subheader("Filtrar Fechas")
+                # --- FILTRO POR FECHAS EN SIDEBAR ---
+                st.sidebar.subheader("📅 Filtrar Fechas")
                 fecha_min = df_gastos["Fecha_dt"].min()
                 fecha_max = df_gastos["Fecha_dt"].max()
 
@@ -143,52 +147,69 @@ if verificar_password():
                 else:
                     df_filtrado = df_gastos.copy()
 
-                # --- TOTAL Y BOTÓN DE DESCARGA EN EXCEL ---
-                col_metric, col_download = st.columns([2, 1])
-                
-                with col_metric:
-                    st.metric("Total Gastado en el Periodo", f"{df_filtrado['Importe (€)'].sum():.2f} €")
-                
-                with col_download:
-                    # Generar archivo Excel en memoria (.xlsx)
-                    output = io.BytesIO()
-                    df_export = df_filtrado.drop(columns=["Fecha_dt"], errors="ignore")
-                    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                        df_export.to_excel(writer, index=False, sheet_name='Gastos')
-                    excel_data = output.getvalue()
+                # --- MÉTRICA PRINCIPAL Y DESCARGA ---
+                st.metric("Total Gastado en Periodo", f"{df_filtrado['Importe (€)'].sum():.2f} €")
 
-                    st.download_button(
-                        label="📥 Descargar Excel (.xlsx)",
-                        data=excel_data,
-                        file_name=f"historico_gastos_{datetime.now().strftime('%Y%m%d')}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                # Exportador a Excel (.xlsx)
+                output = io.BytesIO()
+                df_export = df_filtrado.drop(columns=["Fecha_dt"], errors="ignore")
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    df_export.to_excel(writer, index=False, sheet_name='Gastos')
+                excel_data = output.getvalue()
+
+                st.download_button(
+                    label="📥 Descargar Excel (.xlsx)",
+                    data=excel_data,
+                    file_name=f"gastos_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
+
+                st.divider()
+
+                # --- GRÁFICO CIRCULAR POR TIPO DE GASTO ---
+                st.subheader("🥧 Distribución por Tipo de Gasto")
+                if "Tipo de Gasto" in df_filtrado.columns and not df_filtrado.empty:
+                    df_pie = df_filtrado.groupby("Tipo de Gasto")["Importe (€)"].sum().reset_index()
+                    
+                    fig = px.pie(
+                        df_pie, 
+                        values="Importe (€)", 
+                        names="Tipo de Gasto",
+                        hole=0.4,
+                        color_discrete_sequence=px.colors.qualitative.Pastel
                     )
+                    # Muestra % y la cantidad total en € en la etiqueta
+                    fig.update_traces(textinfo="percent+value", hovertemplate="%{label}: %{value:.2f} € (%{percent})")
+                    fig.update_layout(margin=dict(t=20, b=20, l=10, r=10))
+                    
+                    st.plotly_chart(fig, use_container_width=True)
 
                 st.divider()
 
-                # --- GRÁFICOS RESUMEN ---
-                st.subheader("📈 Gráficos Resumen")
-                col_g1, col_g2 = st.columns(2)
+                # --- TABLAS DE DESGLOSE POR CONCEPTO Y TIPO DE GASTO ---
+                st.subheader("📋 Desglose por Concepto")
+                
+                if "Tipo de Gasto" in df_filtrado.columns and "Concepto" in df_filtrado.columns:
+                    tipos_existentes = df_filtrado["Tipo de Gasto"].unique()
 
-                with col_g1:
-                    st.markdown("**Gastos por Tipo**")
-                    if "Tipo de Gasto" in df_filtrado.columns:
-                        resumen_tipo = df_filtrado.groupby("Tipo de Gasto")["Importe (€)"].sum().reset_index()
-                        st.bar_chart(data=resumen_tipo, x="Tipo de Gasto", y="Importe (€)")
-
-                with col_g2:
-                    st.markdown("**Gastos por Concepto**")
-                    if "Concepto" in df_filtrado.columns:
-                        resumen_concepto = df_filtrado.groupby("Concepto")["Importe (€)"].sum().reset_index()
-                        st.bar_chart(data=resumen_concepto, x="Concepto", y="Importe (€)")
+                    for tipo in tipos_existentes:
+                        with st.expander(f"🔹 **{tipo}**", expanded=True):
+                            df_sub = df_filtrado[df_filtrado["Tipo de Gasto"] == tipo]
+                            resumen_concepto = df_sub.groupby("Concepto")["Importe (€)"].sum().reset_index()
+                            resumen_concepto = resumen_concepto.sort_values(by="Importe (€)", ascending=False)
+                            
+                            # Formato moneda para la tabla
+                            resumen_concepto["Importe (€)"] = resumen_concepto["Importe (€)"].map("{:.2f} €".format)
+                            
+                            st.dataframe(resumen_concepto, use_container_width=True, hide_index=True)
 
                 st.divider()
 
-                # --- TABLA INTERACTIVA DE HISTÓRICO Y ELIMINACIÓN ---
-                st.subheader("🗂️ Histórico de Gastos (Seleccionar para eliminar)")
-                st.caption("Marca las casillas de los registros que quieras borrar y pulsa el botón de abajo.")
+                # --- HISTÓRICO Y ELIMINACIÓN DE REGISTROS ---
+                st.subheader("🗂️ Histórico de Registros")
+                st.caption("Selecciona una o varias filas si deseas eliminarlas.")
 
-                # Preparar DataFrame para data_editor agregando columna de selección
                 df_tabla = df_filtrado.drop(columns=["Fecha_dt"], errors="ignore").copy()
                 df_tabla.insert(0, "Eliminar", False)
 
@@ -196,16 +217,14 @@ if verificar_password():
                     df_tabla,
                     hide_index=True,
                     column_config={"Eliminar": st.column_config.CheckboxColumn("Eliminar", default=False)},
-                    disabled=["Fecha", "Tipo de Gasto", "Concepto", "Importe (€)", "Comentarios"],
+                    disabled=["Fecha", "Tipo de Gasto", "Concepto", "Método de Pago", "Importe (€)", "Comentarios"],
                     use_container_width=True
                 )
 
-                # Procesar la eliminación de filas seleccionadas
                 filas_a_eliminar = edited_df[edited_df["Eliminar"] == True]
 
                 if not filas_a_eliminar.empty:
-                    if st.button("🗑️ Eliminar registros seleccionados", type="primary"):
-                        # Filtrar df_gastos original descartando las filas marcadas
+                    if st.button("🗑️ Eliminar seleccionados", type="primary", use_container_width=True):
                         indices_borrar = filas_a_eliminar.index
                         df_nuevo = df_gastos.drop(columns=["Fecha_dt"], errors="ignore").drop(index=indices_borrar)
                         
@@ -214,7 +233,7 @@ if verificar_password():
                             st.success("Registros eliminados correctamente.")
                             st.rerun()
                         except Exception as e:
-                            st.error(f"Error al eliminar en la base de datos: {e}")
+                            st.error(f"Error al actualizar la base de datos: {e}")
 
             else:
                 st.info("Aún no hay datos registrados en el historial.")
