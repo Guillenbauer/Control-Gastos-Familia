@@ -14,6 +14,20 @@ st.set_page_config(
     layout="centered"  # Ajustado a centrado para mejorar la vista en móviles
 )
 
+# --- INYECCIÓN DE ICONO PARA MÓVILES ---
+URL_MI_ICONO = "https://github.com/Guillenbauer/Control-Gastos-Familia/blob/main/Icono.png?raw=true"
+
+st.markdown(
+    f"""
+    <head>
+        <link rel="apple-touch-icon" sizes="180x180" href="{URL_MI_ICONO}">
+        <link rel="icon" type="image/png" sizes="192x192" href="{URL_MI_ICONO}">
+        <link rel="shortcut icon" href="{URL_MI_ICONO}">
+    </head>
+    """,
+    unsafe_allow_html=True
+)
+
 def verificar_password():
     if "autenticado" not in st.session_state:
         st.session_state.autenticado = False
