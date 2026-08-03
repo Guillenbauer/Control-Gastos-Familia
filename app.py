@@ -135,10 +135,6 @@ try:
             st.bar_chart(data=resumen, x="Categoría", y="Importe (€)")
     else:
         st.info("Aún no hay gastos registrados.")
-except Exception as e:
-    st.info("Agrega tu primer gasto arriba para comenzar a sincronizar.")
-    st.bar_chart(data=resumen, x="Categoría", y="Importe (€)")
-    else:
-        st.info("Aún no hay gastos registrados.")
+
 except Exception as e:
     st.info("Agrega tu primer gasto arriba para comenzar a sincronizar.")
