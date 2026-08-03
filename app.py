@@ -58,7 +58,7 @@ if verificar_password():
         ]
     }
 
-    METODOS_PAGO = ["Tarjeta", "Efectivo", "Transferencia", "Bizum", "Otro"]
+    METODOS_PAGO = ["Tarjeta", "Efectivo", "Transferencia", "Bizum", "Recibo", "Otro"]
 
     # ==========================================
     # 3. NAVEGACIÓN LATERAL
