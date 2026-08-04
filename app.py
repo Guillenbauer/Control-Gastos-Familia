@@ -17,17 +17,17 @@ st.set_page_config(
 # Diccionario de usuarios y sus pestañas correspondientes en Google Sheets
 USUARIOS = {
     "familia_ag": {
-        "nombre": "Guille y Sara",
+        "nombre": "Guille_Sara",
         "password": "FamiliaGSPA2026",
         "worksheet": "Gastos_AG"
     },
     "familia_af": {
-        "nombre": "Paco y Marimar",
+        "nombre": "Paco_Marimar",
         "password": "FamiliaPM2026",
         "worksheet": "Gastos_AF"
     },
     "familia_aa": {
-        "nombre": "Javi y Myr",
+        "nombre": "Javi_Myr",
         "password": "FamiliaJM2026",
         "worksheet": "Gastos_AA"
     }
