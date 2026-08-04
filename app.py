@@ -6,7 +6,7 @@ import plotly.express as px
 from streamlit_gsheets import GSheetsConnection
 
 # ==========================================
-# 1. CONFIGURACIÓN Y LOGIN
+# 1. CONFIGURACIÓN Y LOGIN MULTI-USUARIO
 # ==========================================
 st.set_page_config(
     page_title="Control de Gastos Familiar", 
@@ -14,23 +14,50 @@ st.set_page_config(
     layout="centered"  # Ajustado a centrado para mejorar la vista en móviles
 )
 
+# Diccionario de usuarios y sus pestañas correspondientes en Google Sheets
+USUARIOS = {
+    "familia_ag": {
+        "nombre": "Guille y Sara",
+        "password": "FamiliaGSPA2026",
+        "worksheet": "Gastos_AG"
+    },
+    "familia_af": {
+        "nombre": "Paco y Marimar",
+        "password": "FamiliaPM2026",
+        "worksheet": "Gastos_AF"
+    },
+    "familia_aa": {
+        "nombre": "Javi y Myr",
+        "password": "FamiliaJM2026",
+        "worksheet": "Gastos_AA"
+    }
+}
+
 def verificar_password():
     if "autenticado" not in st.session_state:
         st.session_state.autenticado = False
+        st.session_state.usuario_actual = None
 
     if not st.session_state.autenticado:
         st.title("🔒 Acceso Restringido")
-        pwd = st.text_input("Introduce la contraseña de acceso:", type="password")
+        usuario_input = st.text_input("Usuario / Grupo:").strip().lower()
+        pwd_input = st.text_input("Introduce la contraseña de acceso:", type="password")
+        
         if st.button("Entrar", use_container_width=True):
-            if pwd == "FamiliaGSPA2026":
+            if usuario_input in USUARIOS and USUARIOS[usuario_input]["password"] == pwd_input:
                 st.session_state.autenticado = True
+                st.session_state.usuario_actual = usuario_input
                 st.rerun()
             else:
-                st.error("Contraseña incorrecta")
+                st.error("Usuario o contraseña incorrectos")
         return False
     return True
 
 if verificar_password():
+
+    # Obtener datos del usuario logueado
+    datos_usuario = USUARIOS[st.session_state.usuario_actual]
+    pestaña_activa = datos_usuario["worksheet"]
 
     # Conexión con Google Sheets
     conn = st.connection("gsheets", type=GSheetsConnection)
@@ -40,7 +67,7 @@ if verificar_password():
     # ==========================================
     OPCIONES_CONCEPTOS = {
         "Fijos_Básicos": [
-            "Hipoteca", "Colegio (La Salle)", "Guardería", 
+            "Hipoteca", "Colegio", 
             "Comunidad", "Telefonía (O2)", "IBI"
         ],
         "Fijos_Opcionales": [
@@ -63,7 +90,13 @@ if verificar_password():
     # ==========================================
     # 3. NAVEGACIÓN LATERAL
     # ==========================================
-    st.sidebar.title("📌 Menú")
+    st.sidebar.title(f"👤 {datos_usuario['nombre']}")
+    if st.sidebar.button("🚪 Cerrar Sesión"):
+        st.session_state.autenticado = False
+        st.session_state.usuario_actual = None
+        st.rerun()
+
+    st.sidebar.divider()
     opcion_menu = st.sidebar.radio("Ir a:", ["Registrar Gasto", "Estadísticas y Histórico"])
 
     # ==========================================
@@ -106,9 +139,9 @@ if verificar_password():
                 }])
                 
                 try:
-                    df_existente = conn.read(ttl=0)
+                    df_existente = conn.read(worksheet=pestaña_activa, ttl=0)
                     df_actualizado = pd.concat([df_existente, nuevo_gasto], ignore_index=True)
-                    conn.update(data=df_actualizado)
+                    conn.update(worksheet=pestaña_activa, data=df_actualizado)
                     st.success("¡Gasto registrado con éxito!")
                 except Exception as e:
                     st.error(f"Error al guardar los datos: {e}")
@@ -120,7 +153,7 @@ if verificar_password():
         st.title("📊 Estadísticas de Gastos")
 
         try:
-            df_gastos = conn.read(ttl=0)
+            df_gastos = conn.read(worksheet=pestaña_activa, ttl=0)
 
             if not df_gastos.empty and "Importe (€)" in df_gastos.columns:
                 df_gastos["Importe (€)"] = pd.to_numeric(df_gastos["Importe (€)"], errors="coerce").fillna(0)
@@ -160,7 +193,7 @@ if verificar_password():
                 st.download_button(
                     label="📥 Descargar Excel (.xlsx)",
                     data=excel_data,
-                    file_name=f"gastos_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                    file_name=f"gastos_{pestaña_activa}_{datetime.now().strftime('%Y%m%d')}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True
                 )
@@ -229,7 +262,7 @@ if verificar_password():
                         df_nuevo = df_gastos.drop(columns=["Fecha_dt"], errors="ignore").drop(index=indices_borrar)
                         
                         try:
-                            conn.update(data=df_nuevo)
+                            conn.update(worksheet=pestaña_activa, data=df_nuevo)
                             st.success("Registros eliminados correctamente.")
                             st.rerun()
                         except Exception as e:
