@@ -16,18 +16,18 @@ st.set_page_config(
 
 # Diccionario de usuarios y sus pestañas correspondientes en Google Sheets
 USUARIOS = {
-    "familia_ag": {
-        "nombre": "Guille_Sara",
+    "Guille_Sara": {
+        "nombre": "Guille y Sara",
         "password": "FamiliaGSPA2026",
         "worksheet": "Gastos_AG"
     },
-    "familia_af": {
-        "nombre": "Paco_Marimar",
+    "Paco_Marimar": {
+        "nombre": "Paco y Marimar",
         "password": "FamiliaPM2026",
         "worksheet": "Gastos_AF"
     },
-    "familia_aa": {
-        "nombre": "Javi_Myr",
+    "Javi_Myr": {
+        "nombre": "Javi y Myr",
         "password": "FamiliaJM2026",
         "worksheet": "Gastos_AA"
     }
@@ -40,16 +40,29 @@ def verificar_password():
 
     if not st.session_state.autenticado:
         st.title("🔒 Acceso Restringido")
-        usuario_input = st.text_input("Usuario / Grupo:").strip().lower()
+        
+        # Mapeo para mostrar nombres bonitos en el desplegable
+        opciones_usuarios = {v["nombre"]: k for k, v in USUARIOS.items()}
+        
+        # 1. Desplegable para seleccionar el usuario/familia
+        usuario_seleccionado_nombre = st.selectbox(
+            "Selecciona tu Usuario / Grupo:", 
+            list(opciones_usuarios.keys())
+        )
+        
+        # Obtener el ID interno del usuario seleccionado
+        usuario_clave = opciones_usuarios[usuario_seleccionado_nombre]
+        
+        # 2. Campo para la contraseña
         pwd_input = st.text_input("Introduce la contraseña de acceso:", type="password")
         
         if st.button("Entrar", use_container_width=True):
-            if usuario_input in USUARIOS and USUARIOS[usuario_input]["password"] == pwd_input:
+            if USUARIOS[usuario_clave]["password"] == pwd_input:
                 st.session_state.autenticado = True
-                st.session_state.usuario_actual = usuario_input
+                st.session_state.usuario_actual = usuario_clave
                 st.rerun()
             else:
-                st.error("Usuario o contraseña incorrectos")
+                st.error("Contraseña incorrecta")
         return False
     return True
 
@@ -67,7 +80,7 @@ if verificar_password():
     # ==========================================
     OPCIONES_CONCEPTOS = {
         "Fijos_Básicos": [
-            "Hipoteca", "Colegio", 
+            "Hipoteca", "Colegio (La Salle)", "Guardería", 
             "Comunidad", "Telefonía (O2)", "IBI"
         ],
         "Fijos_Opcionales": [
