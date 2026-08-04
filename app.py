@@ -76,25 +76,54 @@ if verificar_password():
     conn = st.connection("gsheets", type=GSheetsConnection)
 
     # ==========================================
-    # 2. DICCIONARIOS Y OPCIONES
+    # 2. DICCIONARIOS Y OPCIONES (ACTUALIZADO)
     # ==========================================
     OPCIONES_CONCEPTOS = {
         "Fijos_Básicos": [
-            "Hipoteca", "Colegio (La Salle)", "Guardería", 
-            "Comunidad", "Telefonía (O2)", "IBI"
+            "Comunidad",
+            "Educación",
+            "Hipoteca",
+            "IBI",
+            "Internet y Telefonía",
+            "Transporte Público",
+            "Otros"
         ],
         "Fijos_Opcionales": [
-            "Extraescolares", "Suscripciones", "Seguro Médico", "Alquiler Garaje"
+            "Alquiler Garaje",
+            "Extraescolares",
+            "Seguro Médico",
+            "Suscripciones",
+            "Otros"
         ],
         "Variables_Básicos": [
-            "Gasolina", "Luz", "Agua", "Gas", "Alimentación", 
-            "Farmacia", "Seguro Hogar", "Seguro Coche"
+            "Agua",
+            "Alimentación",
+            "Farmacia",
+            "Gas",
+            "Gasolina",
+            "Luz",
+            "Mascota",
+            "Seguro Coche",
+            "Seguro Hogar",
+            "Seguro Mascota",
+            "Otros"
         ],
         "Variables_Opcionales": [
-            "Viajes", "Regalos", "Ocio (Cine, Bolera...)", "Restaurantes", 
-            "Ropa", "Alimentación", "Peluquero", "Taller Coche", 
-            "Caldera", "Electrodomésticos", "Parking", "Peaje", 
-            "Otros", "Recon. Médico", "Gastos Heredado"
+            "Ahorro",
+            "Caldera",
+            "Electrodomésticos",
+            "Gastos Heredado",
+            "Ocio (Cine,Bolera...)",
+            "Parking",
+            "Peaje",
+            "Peluquero",
+            "Regalos",
+            "Restaurantes",
+            "Ropa",
+            "Salud y Bienestar",
+            "Taller Coche",
+            "Viajes",
+            "Otros"
         ]
     }
 
